@@ -11,6 +11,19 @@ st.set_page_config(
     layout="centered"
 )
 
+# Injeção de Meta Tags para transformar a página em Aplicativo de Celular (Ícone na Tela Inicial)
+st.markdown("""
+    <head>
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-mobile-web-app-title" content="Sentinela Bravo">
+        <meta name="mobile-web-app-capable" content="yes">
+        
+        <link rel="apple-touch-icon" href="sentinela_icon_192.jpg">
+        <link rel="icon" sizes="192x192" href="sentinela_icon_192.jpg">
+    </head>
+""", unsafe_allow_html=True)
+
 # Estilização profissional em modo escuro padrão Stellantis
 st.markdown("""
     <style>
@@ -33,7 +46,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Carrega o brasão oficial do Sentinela
+# Carrega o brasão oficial do Sentinela no topo da página
 try:
     logo_sentinela = Image.open("sentinela_icon_192.jpg")
     st.image(logo_sentinela, width=150)
@@ -58,17 +71,17 @@ except Exception as e:
 
 # 3. INTERFACE DE SELEÇÃO E ENTRADA DE DADOS
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">🚨 Classificação do Evento (Diretrizes Oficiais)</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">🚨 Natureza da Ocorrência Operacional</div>', unsafe_allow_html=True)
 
 tipo_ocorrencia = st.selectbox(
-    "Selecione a natureza da ocorrência para aplicar o manual técnico:",
+    "Selecione a opção correspondente para carregar as regras de auditoria:",
     [
         "Selecione uma opção...",
-        "Acidente de Trânsito / Colisão / Choque / Abalroamento",
-        "Falha Mecânica / Logística (Excesso de Jornada / Carga Tombada / Danos)",
-        "Desvio de Segurança / Quebra de Regra de Ouro (Empilhadeiras / NR-11)",
-        "Recolhimento em Revista (Notebooks / Celulares / Sem Documentação)",
-        "Controle de Portaria (Instabilidade Ronda / Saída Fora do Horário / Trava Rodas)",
+        "Acidente de Trânsito / Colisão Interna (Choque ou Abalroamento)",
+        "📦 Carga Tombada / Peças Molhadas / Danos em Racks",
+        "❌ Recusa de Carga / Divergência Fiscal / Excesso de Jornada",
+        "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)",
+        "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)",
         "🔥 FATO NOVO / Ocorrência Complexa (Sem Modelo Prévio)"
     ]
 )
@@ -77,137 +90,28 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Bloco do Relato Livre
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">📝 Relato Técnico da Ocorrência</div>', unsafe_allow_html=True)
-st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Dite ou escreva o relato bruto. Lembre-se: O BO deve ser reportado em até 1 hora após o fato.</p>", unsafe_allow_html=True)
+st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Dite ou escreva o relato bruto. Foque na localização micrométrica (Galpão, Coluna), dados de motoristas/líderes e documentos (DANFE/MVM).</p>", unsafe_allow_html=True)
 
-relato_bruto = st.text_area("Descreva os fatos ocorridos no turno:", height=180, placeholder="Ex: No dia tal, às xx:xx, no Galpão X coluna xx, identificamos...")
+relato_bruto = st.text_area("Descreva os fatos ocorridos no turno:", height=180, placeholder="Ex: Acionados pelo líder às xx:xx, no Galpão 04 coluna 26AB...")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Bloco de Anexos
+# Bloco de Anexos com Compactação Automática em tempo de execução
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📸 Adicionar Evidências Visuais (Fotos do Contexto e Detalhes)</div>', unsafe_allow_html=True)
-arquivo_anexado = st.file_uploader("Anexe evidências (Fotos amplas/fechadas, MVM, CNH, DANFE ou Croqui)", type=["png", "jpg", "jpeg"])
+st.markdown('<div class="section-title">📸 Adicionar Evidências Visuais (Compactação Ativa)</div>', unsafe_allow_html=True)
+arquivo_anexado = st.file_uploader("Anexe evidências (Fotos, MVM, CNH, DANFE ou Croqui)", type=["png", "jpg", "jpeg"])
 
-imagem_carregada = None
+imagem_compactada = None
 if arquivo_anexado is not None:
     try:
-        imagem_carregada = Image.open(io.BytesIO(arquivo_anexado.read()))
-        st.image(imagem_carregada, caption="📸 Imagem Anexada com Sucesso", use_container_width=True)
-    except Exception as e:
-        st.error(f"Erro ao carregar a imagem: {e}")
-st.markdown('</div>', unsafe_allow_html=True)
-
-# 4. PROCESSAMENTO DOS PROMPTS ENRIQUECIDOS COM O MANUAL
-if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
-    if tipo_ocorrencia == "Selecione uma opção...":
-        st.warning("Por favor, selecione a natureza da ocorrência antes de continuar.")
-    elif relato_bruto.strip() == "":
-        st.warning("Por favor, informe o relato da ocorrência antes de continuar.")
-    else:
+        img_original = Image.open(arquivo_anexado)
         
-        # DEFINIÇÃO DO BANCO DE DIRETRIZES DA PÁGINA 3 E DO MANUAL
-        diretrizes_conhecimento = """
-        DIRETRIZES OBRIGATÓRIAS DO MANUAL (PÁGINA 3):
-        1. Clareza e Objetividade: Texto estritamente técnico e factual. Sem opiniões pessoais ou termos subjetivos.
-        2. Rastreabilidade de Terceiros: Para motoristas/prestadores externos, é OBRIGATÓRIO constar: RG/CPF, CNH com vencimento, telefone, endereço residencial e FILIAÇÃO COMPLETA (Pai e Mãe).
-        3. Identificação de Lideranças: Exigir nome, sobrenome e registro do Líder, Supervisor ou Gerente da área responsável (Team Leaders não respondem administrativamente).
-        4. Regra de Fotos: Devem ser registradas fotos amplas (para contexto) e fechadas (para foco no dano/placa/etiqueta).
-        5. Prazo Operacional: O fato precisa ser reportado em até 1 hora no sistema.
-        6. Protocolo de Acidentes/Incidentes: Todo evento com lesão ou acidente móvel exige conferir se houve acionamento do Técnico de Segurança do Trabalho, encaminhamento compulsório ao CSO, identificação da equipe médica que atendeu (médico/enfermeiro e CRM) e o desfecho clínico (retorno ao trabalho ou residência).
-        7. Terminologia de Trânsito: Proibido usar o termo genérico 'danificado'. Use termos específicos: amassado, quebrado, riscado, trincado. Diferencie:
-           - COLISÃO: Impacto geral entre corpos.
-           - CHOQUE: Veículo em movimento contra obstáculo ou veículo parado.
-           - ABALROAMENTO: Impacto lateral entre dois veículos em movimento.
-        8. Casos de Revista/Notebooks: Rastrear marcas, patrimônios, etiquetas QR Code e conferir destinação à Alfândega.
-        9. Casos de Logística/Carga: Conferir notas DANFE, códigos de desenho de peças, número de MVM e cumprimento da Lei 13.103 de limite de 5 horas de jornada física do motorista.
-        """
-
-        # --- FASE 1: O CLAUDE VALIDA BASEADO NAS REGRAS INJETADAS ---
-        with st.spinner("🕵️ O Claude está auditando com base nas regras do Manual Técnico..."):
-            prompt_auditoria = f"""
-            Você é um auditor sênior de segurança patrimonial industrial da Stellantis.
-            Sua missão é confrontar o relato do vigilante contra a nossa base de conhecimento oficial e apontar lacunas.
-
-            BASE DE CONHECIMENTO TÉCNICA DO SISTEMA:
-            {diretrizes_conhecimento}
-
-            CATEGORIA DA OCORRÊNCIA SELECIONADA: {tipo_ocorrencia}
-            RELATO DO TURNO: "{relato_bruto}"
-
-            RESPONDA EXCLUSIVAMENTE em formato Markdown bem estruturado:
-            1. **Status de Conformidade**: (COMPLETO se tiver tudo, ou INCOMPLETO se faltar dados).
-            2. **Análise de Rastreabilidade**: (Liste o que foi identificado: locais/colunas, nomes, documentos, placas).
-            3. **Lacunas Conforme Página 3**: (Aponte estritamente o que o vigilante esqueceu com base no manual, como falta de filiação, falta de dados de quem atendeu no CSO, uso do termo inadequado 'danificado', falta do registro do supervisor, ou estouro do prazo de 1 hora).
-            """
-            
-            try:
-                response_claude = anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1000,
-                    temperature=0.1,
-                    messages=[{"role": "user", "content": prompt_auditoria}]
-                )
-                resultado_auditoria = response_claude.content[0].text
-                st.markdown("### 📋 Auditoria de Conformidade (Claude 3.5 - Regras do Manual)")
-                st.markdown(resultado_auditoria)
-            except Exception as e:
-                st.error(f"Erro na auditoria: {e}")
-                resultado_auditoria = "Erro na auditoria."
-
-        # --- FASE 2: O GEMINI FORMATA O BO PADRÃO DE EXCELÊNCIA ---
-        with st.spinner("⚡ O Gemini está estruturando o Boletim de Ocorrência oficial..."):
-            prompt_bo = f"""
-            Você é um redator especialista em segurança corporativa industrial. Pegue o relato do vigilante e as considerações da auditoria e compile um Boletim de Ocorrência Interno oficial padrão Stellantis.
-            Campos que não foram informados no texto bruto devem ficar marcados formalmente como "[NÃO INFORMADO]" para que fiquem evidentes.
-
-            {diretrizes_conhecimento}
-
-            RELATO DO VIGILANTE: "{relato_bruto}"
-
-            ESTRUTURE O DOCUMENTO EXATAMENTE NESTES TÓPICOS:
-            ### 🛡️ BOLETIM DE OCORRÊNCIA INTERNO - SQUAD BRAVO
-
-            **1. DADOS DE CONTROLE & ACIONAMENTO**
-            - **Data/Hora do Fato**: 
-            - **Localização Exata**: (Indicar Galpão, Coluna específica, Prédio, Sentido da Via ou Portaria)
-            - **Líder/Supervisor Solicitante & Registro**: 
-            - **Horário do Chamado**: 
-            - **Vigilante Relator / Registro**: 
-
-            **2. QUALIFICAÇÃO CRUZADA DOS ENVOLVIDOS (RASTREAMENTO PÁG 3)**
-            - **Vínculo**: (Colaborador Interno / Terceiro / Prestador / Fornecedor)
-            - **Nome Completo**: 
-            - **Matrícula / Registro Funcional**: 
-            - **Empresa / Transportadora / Fornecedor**: 
-            - **Documentos (RG/CPF)**: 
-            - **Habilitação (CNH / Vencimento)**: 
-            - **Telefone de Contato**: 
-            - **Endereço Residencial**: 
-            - **Filiação Completa (Pai e Mãe)**: 
-            - **Supervisor Direto da Parte (Nome, Registro e Contato)**: 
-
-            **3. DADOS DE ATIVOS / VEÍCULOS / LOGÍSTICA**
-            - **Equipamento/Veículo**: (Modelo, Marca, Prefixo ou Placas Combinadas de Carreta/Sider)
-            - **Documentação de Carga/Material**: (MVM / DANFE / Patrimônio do Notebook / Termos de Liberação)
-            - **Danos Materiais Especificados**: (Listagem detalhada usando os termos técnicos exatos: amassado, quebrado, riscado, trincado. Liste também avarias pré-existentes se houver)
-
-            **4. DINÂMICA COMPLETA DOS FATOS & ALEGAÇÃO**
-            - (Narrativa cronológica clara, impessoal e detalhada sobre o acontecimento).
-            - **Alegação Coletada**: (Transcrição formal da justificativa apresentada pelo envolvido principal).
-
-            **5. TRATATIVAS TÉCNICAS, ADMINISTRATIVAS & STATUS**
-            - **Status Vigente do Caso**: (CONCLUÍDO NO LOCAL / EM ABERTO PARA INVESTIGAÇÃO)
-            - **Resolução Operacional Imediata**: (Medidas tomadas pela equipe no local do fato, destinação de materiais à qualidade ou retenção)
-            - **Suporte Médico / CSO**: (Dados de encaminhamento ao CSO, atendimento por enfermagem/médicos, CRM e desfecho clínico, se aplicável)
-            - **Segurança do Trabalho (SESMT)**: (Envolvimento do Técnico de Segurança, Enquadramento em Regras de Ouro como a nº 8, Classificação da Gravidade ou Emissão de Notificação de Consequências)
-            """
-            
-            try:
-                model_gemini = genai.GenerativeModel("gemini-1.5-flash")
-                response_gemini = model_gemini.generate_content(prompt_bo)
-                
-                st.markdown("---")
-                st.markdown("### 📄 Documento Compilado (Gemini 1.5 Flash)")
-                st.code(response_gemini.text, language="markdown")
-                st.success("✨ Boletim técnico blindado e gerado com sucesso!")
-            except Exception as e:
-                st.error(f"Erro ao gerar o documento: {e}")
+        if img_original.width > 1280:
+            proporcao = 1280 / float(img_original.width)
+            altura_alvo = int((float(img_original.height) * float(proporcao)))
+            img_original = img_original.resize((1280, altura_alvo), Image.Resampling.LANCZOS)
+        
+        buffer_ram = io.BytesIO()
+        if img_original.mode in ("RGBA", "P"):
+            img_original = img_original.convert("RGB")
+        img_original.save(buffer_ram, format="JPEG", quality=75, optimize=True)
+        buffer_ram.seek(0)
