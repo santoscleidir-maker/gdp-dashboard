@@ -94,7 +94,7 @@ st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Dite ou escreva o relat
 relato_bruto = st.text_area("Descreva os fatos ocorridos no turno:", height=180, placeholder="Ex: Acionados pelo líder às xx:xx, no Galpão 04 coluna 26AB...")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Bloco de Anexos com Correção do AttributeError
+# Bloco de Anexos com Compactação Ativa
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">📸 Adicionar Evidências Visuais (Compactação Ativa)</div>', unsafe_allow_html=True)
 arquivo_anexado = st.file_uploader("Anexe evidências (Fotos, MVM, CNH, DANFE ou Croqui)", type=["png", "jpg", "jpeg"])
@@ -102,11 +102,9 @@ arquivo_anexado = st.file_uploader("Anexe evidências (Fotos, MVM, CNH, DANFE ou
 imagem_compactada = None
 if arquivo_anexado is not None:
     try:
-        # CORREÇÃO: Lendo os bytes diretamente do arquivo carregado na memória do Streamlit
         dados_da_imagem = arquivo_anexado.read()
         img_original = PILImage.open(io.BytesIO(dados_da_imagem))
         
-        # Redimensiona se a foto for gigante
         if img_original.width > 1280:
             proporcao = 1280 / float(img_original.width)
             altura_alvo = int((float(img_original.height) * float(proporcao)))
@@ -116,7 +114,6 @@ if arquivo_anexado is not None:
         if img_original.mode in ("RGBA", "P"):
             img_original = img_original.convert("RGB")
             
-        # Otimiza e espreme o peso do arquivo para JPEG 75%
         img_original.save(buffer_ram, format="JPEG", quality=75, optimize=True)
         buffer_ram.seek(0)
         
@@ -200,8 +197,9 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
             """
             
             try:
+                # CORREÇÃO: Utilizando a nomenclatura de modelo atualizada e definitiva da Anthropic
                 response_claude = anthropic_client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-3-5-sonnet-latest",
                     max_tokens=1000,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt_auditoria}]
@@ -209,7 +207,7 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
                 st.markdown("### 📋 Auditoria de Conformidade (Claude 3.5 - Regras do Manual)")
                 st.markdown(response_claude.content[0].text)
             except Exception as e:
-                st.error(f"Erro na auditoria: {e}")
+                st.error(f"Erro na auditoria do Claude: {e}")
 
         # --- FASE 2: O GEMINI GERA O DOCUMENTO FINAL ---
         with st.spinner("⚡ O Gemini está estruturando o Boletim de Ocorrência oficial..."):
