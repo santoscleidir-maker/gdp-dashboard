@@ -94,7 +94,7 @@ st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Dite ou escreva o relat
 relato_bruto = st.text_area("Descreva os fatos ocorridos no turno:", height=180, placeholder="Ex: Acionados pelo líder às xx:xx, no Galpão 04 coluna 26AB...")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Bloco de Anexos com Compactação Automática Corrigida
+# Bloco de Anexos com Correção do AttributeError
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">📸 Adicionar Evidências Visuais (Compactação Ativa)</div>', unsafe_allow_html=True)
 arquivo_anexado = st.file_uploader("Anexe evidências (Fotos, MVM, CNH, DANFE ou Croqui)", type=["png", "jpg", "jpeg"])
@@ -102,21 +102,21 @@ arquivo_anexado = st.file_uploader("Anexe evidências (Fotos, MVM, CNH, DANFE ou
 imagem_compactada = None
 if arquivo_anexado is not None:
     try:
-        # Abre usando a nova nomenclatura segura
-        img_original = PILImage.open(arquivo_anexado)
+        # CORREÇÃO: Lendo os bytes diretamente do arquivo carregado na memória do Streamlit
+        dados_da_imagem = arquivo_anexado.read()
+        img_original = PILImage.open(io.BytesIO(dados_da_imagem))
         
-        # Redimensiona mantendo a proporção de forma direta
+        # Redimensiona se a foto for gigante
         if img_original.width > 1280:
             proporcao = 1280 / float(img_original.width)
             altura_alvo = int((float(img_original.height) * float(proporcao)))
-            # Correção do NameError usando o atalho interno do PIL para o redimensionamento
             img_original = img_original.resize((1280, altura_alvo), resample=3) 
         
         buffer_ram = io.BytesIO()
         if img_original.mode in ("RGBA", "P"):
             img_original = img_original.convert("RGB")
             
-        # Salva otimizando e espremendo o peso do arquivo
+        # Otimiza e espreme o peso do arquivo para JPEG 75%
         img_original.save(buffer_ram, format="JPEG", quality=75, optimize=True)
         buffer_ram.seek(0)
         
@@ -167,7 +167,7 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
             checklist_dinamico = """
             - Enquadramento: Qual Regra de Ouro foi violada (Ex: Regra nº 8)? 
             - Infracção: Descrição clara e impessoal do ato operacional/falha (Ex: transportar rack de frente tirando visibilidade, falta de EPI).
-            - Punição Técnico: Classificação do SESMT (Falta Leve, Média ou Grave) e número da Emissão de Notificação de Consequências de Saúde e Segurança com hora exata e nome do emissor.
+            - Punição Técnica: Classificação do SESMT (Falta Leve, Média ou Grave) e número da Emissão de Notificação de Consequências de Saúde e Segurança com hora exata e nome do emissor.
             """
         else:
             checklist_dinamico = """
@@ -268,3 +268,4 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
                 st.code(response_gemini.text, language="markdown")
                 st.success("✨ Boletim técnico pronto! Nenhuma imagem foi guardada no celular, mantendo a memória limpa.")
             except Exception as e:
+                st.error(f"Erro ao gerar o documento: {e}")
