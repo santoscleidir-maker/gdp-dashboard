@@ -1,139 +1,225 @@
 import streamlit as st
 import google.generativeai as genai
-import anthropic
+from anthropic import Anthropic
 from PIL import Image
 import io
-# Configuração da página para visualização perfeita em telemóveis
-st.set_page_config(page_title="Sentinela - BO Skill", page_icon="🛡️", layout="centered")
 
-# Estilização personalizada para manter a interface idêntica ao padrão moderno e simpático do usuário
+# 1. CONFIGURAÇÃO DA PÁGINA E IDENTIDADE VISUAL
+st.set_page_config(
+    page_title="Sentinela Bravo - BO Eletrônico",
+    page_icon="🛡️",
+    layout="centered"
+)
+
+# Estilização para manter a interface profissional e escura
 st.markdown("""
     <style>
     .main { background-color: #0d1117; }
-    h1 { color: #f97316; text-align: center; font-size: 32px; font-weight: bold; margin-bottom: 5px; }
-    .subtitle { color: #8b949e; text-align: center; font-size: 16px; margin-bottom: 25px; }
-    .section-card { background-color: #161b22; padding: 18px; border-radius: 12px; border: 1px solid #30363d; margin-bottom: 20px; }
-    .section-title { color: #f97316; font-size: 18px; font-weight: bold; margin-bottom: 12px; }
-    .stTextArea textarea { background-color: #0d1117; color: white; border: 1px solid #30363d; border-radius: 8px; font-size: 16px; }
-    .stTextArea textarea:focus { border-color: #f97316; }
-    .stButton button { width: 100%; background-color: #f97316; color: white; font-weight: bold; padding: 14px; border-radius: 8px; border: none; font-size: 18px; }
-    .stButton button:hover { background-color: #ea580c; }
-    .bo-box { background-color: #161b22; padding: 20px; border-left: 5px solid #238636; border-radius: 8px; color: #e6edf3; font-family: 'Courier New', Courier, monospace; font-size: 15px; white-space: pre-wrap; line-height: 1.6; }
-    .warning-box { background-color: #2c1a04; padding: 15px; border-left: 5px solid #d97706; border-radius: 8px; color: #fcd34d; margin-bottom: 15px; }
-    .hint-text { color: #8b949e; font-size: 13px; margin-top: 5px; }
+    h1 { color: #f97316; text-align: center; margin-bottom: 0px; }
+    .subtitle { color: #8b949e; text-align: center; font-size: 1.1rem; margin-bottom: 2rem; }
+    .section-card {
+        background-color: #161b22;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #30363d;
+        margin-bottom: 15px;
+    }
+    .section-title {
+        color: #f97316;
+        font-size: 1.2rem;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>🛡️ Sentinela</h1>", unsafe_allow_html=True)
-st.markdown("<p class=\"subtitle\">Ecossistema Inteligente de Segurança Patrimonial</p>", unsafe_allow_html=True)
+# Carrega o brasão oficial da Equipe Bravo
+try:
+    logo_sentinela = Image.open("sentinela_icon_192.jpg")
+    st.image(logo_sentinela, width=150)
+except:
+    pass
 
-# Verificação das Chaves nos Secrets do Streamlit
+st.title("Sentinela Bravo")
+st.markdown("<p class='subtitle'>Boletim de Ocorrência Eletrônico Inteligente • Padrão Stellantis</p>", unsafe_allow_html=True)
+
+# 2. VALIDAÇÃO DE CHAVES DE API
 if "GEMINI_API_KEY" not in st.secrets or "CLAUDE_API_KEY" not in st.secrets:
-    st.error("Erro: Certifique-se de configurar GEMINI_API_KEY e CLAUDE_API_KEY nas Configurações Avançadas do Streamlit.")
-else:
-    # Inicialização das APIs
+    st.error("Erro: Certifique-se de configurar GEMINI_API_KEY e CLAUDE_API_KEY nas Configurações do Streamlit.")
+    st.stop()
+
+# Inicialização dos clientes das APIs
+try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    claude_client = anthropic.Anthropic(api_key=st.secrets["CLAUDE_API_KEY"])
+    anthropic_client = Anthropic(api_key=st.secrets["CLAUDE_API_KEY"])
+except Exception as e:
+    st.error(f"Erro ao inicializar as APIs: {e}")
+    st.stop()
 
-    # Bloco 1: Entrada do Usuário
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">✍️ Relato da Ocorrência</div>', unsafe_allow_html=True)
-    st.markdown('<p class="hint-text"><b>Linguagem Simpática:</b> Pode ditar ou escrever do seu jeito! O sistema vai conferir se está tudo certinho antes de fechar o relatório.</p>', unsafe_allow_html=True)
-    
-    relato_bruto = st.text_area(
-        "O que aconteceu no turno?",
-        height=140,
-        placeholder="Ex: Teve uma batida de uma carreta na viga da portaria 4 agora cedo. Amassou a viga e quebrou o parachoque do caminhão..."
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+# 3. INTERFACE DE SELEÇÃO E ENTRADA DE DADOS
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">🚨 Classificação do Evento</div>', unsafe_allow_html=True)
 
-    # Bloco 2: Anexos
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📸 Adicionar Fotos ou Documentos</div>', unsafe_allow_html=True)
-    arquivo_anexado = st.file_uploader("Toque para abrir a câmera ou anexar evidência:", type=["png", "jpg", "jpeg"])
-    
-    imagem_carregada = None
-     if arquivo_anexado is not None:
-    imagem_carregada = Image.open(io.BytesIO(arquivo_anexado.read()))
-    st.image(imagem_carregada, caption="📸 Imagem Anexada com Sucesso", use_container_width=True)
- not None:
-        imagem_carregada = Image.open(arquivo_anexado)
-        st.image(imagem_carregada, caption="⚡ Evidência anexada com sucesso!", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+tipo_ocorrencia = st.selectbox(
+    "Selecione a natureza da ocorrência para direcionar o checklist:",
+    [
+        "Selecione uma opção...",
+        "Acidente de Trânsito / Colisão Logística (Danos/Carga)",
+        "Avaria / Danos ao Patrimônio / Qualidade / Reparo / MSO / Near Miss",
+        "Furto / Roubo / Extravio / Peças Faltantes",
+        "Anormalidade / Atitude Suspeita / Acidentes com Funcionários ou Objetos"
+    ]
+)
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # Execução do Fluxo Integrado (Claude Valida -> Gemini Escreve)
-    if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
-        if relato_bruto.strip() == "" and imagem_carregada is None:
-            st.warning("Por favor, digite um relato ou insira uma imagem antes de continuar.")
+# Bloco do Relato Livre (Vigilante dita ou escreve)
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📝 Relato da Ocorrência</div>', unsafe_allow_html=True)
+st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Pode ditar ou escrever do seu jeito! Inclua nomes, horários, placas, alegações e o que foi feito.</p>", unsafe_allow_html=True)
+
+relato_bruto = st.text_area("O que aconteceu no turno?", height=150, placeholder="Ex: Acionados pelo líder fulano às 08h... motorista terceiro alega que...")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Bloco de Anexos (Fotos da ocorrência, documentos, croquis, peças avariadas)
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📸 Adicionar Fotos, Documentos ou Desenho da Peça</div>', unsafe_allow_html=True)
+arquivo_anexado = st.file_uploader("Toque para abrir a câmera ou anexar um arquivo/croqui", type=["png", "jpg", "jpeg"])
+
+imagem_carregada = None
+if arquivo_anexado is not None:
+    try:
+        imagem_carregada = Image.open(io.BytesIO(arquivo_anexado.read()))
+        st.image(imagem_carregada, caption="📸 Imagem Anexada com Sucesso", use_container_width=True)
+    except Exception as e:
+        st.error(f"Erro ao carregar a imagem: {e}")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# 4. PROCESSAMENTO E CRIAÇÃO DOS PROMPTS DINÂMICOS
+if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
+    if tipo_ocorrencia == "Selecione uma opção...":
+        st.warning("Por favor, selecione a natureza da ocorrência antes de processar.")
+    elif relato_bruto.strip() == "":
+        st.warning("Por favor, digite ou dite o relato da ocorrência antes de processar.")
+    else:
+        # Montagem do checklist dinâmico com base na seleção do usuário
+        checklist_especifico = ""
+        if "Acidente de Trânsito" in tipo_ocorrencia:
+            checklist_especifico = """
+            - Identificação dos envolvidos: Se é funcionário Stellantis ou terceiro.
+            - Dados do condutor: Nome completo, CNH, telefone, endereço de residência e filiação (Pai/Mãe).
+            - Dados do veículo: Placa, prefixo, MVM, modelo e o desenho/descrição exata da peça avariada.
+            - Líderes: Nome do líder do setor e telefone, líder solicitante da ocorrência e hora exata da solicitação.
+            - Dinâmica: Houve batida? Houve danos na carga? Quem é o setor responsável (Qualidade, Reparo, MSO)?
+            - Alegação: Qual é a alegação do motorista/terceiro?
+            - Vigilante Relator e Solução: Quem está relatando e qual foi a solução/desfecho dado no local?
+            """
+        elif "Avaria / Danos ao Patrimônio" in tipo_ocorrencia:
+            checklist_especifico = """
+            - Natureza: É Qualidade, Reparo, MSO ou Near Miss (Quase Acidente)?
+            - Identificação: Envolveu funcionários Stellantis ou terceiros? (Nome, ID, empresa, telefone).
+            - Líderes: Quem solicitou o apoio da segurança, que horas solicitou, e quem é o líder responsável pelo setor.
+            - Descrição física: O que foi danificado, quais peças estão avariadas ou faltantes.
+            - Solução e Vigilante Relator: Medidas tomadas para conter o risco e identificação do relator.
+            """
+        elif "Furto / Roubo" in tipo_ocorrencia:
+            checklist_especifico = """
+            - Itens: Quais peças estão avariadas ou faltantes? (Descrição detalhada ou desenho da peça se aplicável).
+            - Dados do suspeito/envolvido: Se terceiro ou funcionário, telefone, CNH, endereço, filiação.
+            - Documentação: MVM (se aplicável), nota fiscal ou documento do material.
+            - Solicitação: Quem deu falta, que horas o vigilante foi acionado e quem é o líder solicitante.
+            - Desfecho: Qual foi a solução ou encaminhamento.
+            """
         else:
-            # --- FASE 1: O CLAUDE VALIDA O MODELO E COLETAS DE DADOS ---
-            with st.spinner("O Claude está auditando a ocorrência e checando os dados mínimos..."):
-                try:
-                    prompt_validacao_claude = (
-                        "Você é um auditor rigoroso de conformidade industrial da Stellantis. "
-                        "Analise o relato do vigilante e diga se ele contém os dados mínimos necessários para um BO válido.\n"
-                        "CHECKLIST EXIGIDO:\n"
-                        "1. O que aconteceu (Fato/Danos)?\n"
-                        "2. Houve vítimas? (Mesmo que não tenha, deve ser mencionado se foram socorridas ou se não há vítimas)\n"
-                        "3. Teve Acidente de Trabalho ou situação de Risco (Classificar se é Near Miss)?\n"
-                        "4. Qual o desfecho inicial / o que foi resolvido no local?\n\n"
-                        f"Relato do Vigilante: {relato_bruto}\n\n"
-                        "RESPOSTA OBRIGATÓORA:\n"
-                        "Se o relato contiver informações ou der a entender as respostas para esses pontos, responda APENAS com a palavra: 'APROVADO'.\n"
-                        "Se faltar alguma dessas informações cruciais (como a questão de vítimas, desfecho para o gerente ou se foi um Near Miss), responda de forma muito SIMPÁTICA, acolhedora e direta para o vigilante, dizendo o que falta ele complementar. Seja breve."
-                    )
+            checklist_especifico = """
+            - Envolvidos: Funcionário Stellantis ou terceiros (Telefone, CNH, endereço, filiação).
+            - Acidentes: Envolveu pessoas ou objetos/equipamentos? Houve Near Miss?
+            - Atendimento: Quem solicitou a presença da segurança e a hora exata. Líder do setor e contato.
+            - Providências: Qual foi a solução imediata e quem é o vigilante relator.
+            """
 
-                    message = claude_client.messages.create(
-                        model="claude-3-5-sonnet-20241022",
-                        max_tokens=150,
-                        temperature=0,
-                        messages=[{"role": "user", "content": prompt_validacao_claude}]
-                    )
-                    
-                    resultado_auditoria = message.content[0].text.strip()
-                    
-                except Exception as e:
-                    st.error(f"Erro na validação do Claude: {e}")
-                    resultado_auditoria = "APROVADO"  # Contingência se a API falhar
+        # --- FASE 1: O CLAUDE VALIDA O CHECKLIST ---
+        with st.spinner("🕵️ O Claude está auditando os dados do relato..."):
+            prompt_auditoria = f"""
+            Você é um auditor rigoroso de segurança patrimonial industrial da planta Stellantis.
+            Sua missão é analisar se o relato bruto do vigilante preenche TODOS os requisitos do checklist exigido para esta categoria.
 
-            # --- FASE 2: DIRECIONAMENTO DO FLUXO ---
-            if "APROVADO" not in resultado_auditoria:
-                st.markdown(f'<div class="warning-box">⚠️ <b>Aviso do Supervisor de Qualidade:</b><br>{resultado_auditoria}</div>', unsafe_allow_html=True)
-            else:
-                with st.spinner("Tudo validado! O Gemini está gerando o relatório formal no padrão Stellantis..."):
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        prompt_execucao_gemini = (
-                            "Você é a inteligência especializada em segurança patrimonial da Stellantis. "
-                            "Sua tarefa é redigir o Boletim de Ocorrência definitivo baseado no relato bruto e imagens. "
-                            "Use obrigatoriamente a linguagem técnica padrão exigida no ambiente industrial.\n\n"
-                            
-                            "EXEMPLOS DE APRENDIZADO DO MODELO OFICIAL (Treinamento In-Context):\n"
-                            "Exemplo 1: 'Registramos a informação do Motorista Especializado Sr. [Nome], reg. [X], que por volta das [X]h[X]min, ocorreu a colisão do caminhão... causando os seguintes danos... Compareceram ao local a Técnico Segurança Trabalho Sra. [Nome], reg. [X], os quais se cientificaram do fato. Anexo: Fotos.'\n"
-                            "Exemplo 2: 'Registramos o comparecimento dos colaboradores listados abaixo, nos balcões das portarias... para confecção de crachás provisórios... devido sistema estar inoperante...'\n\n"
-                            
-                            "REGRAS DE FORMATAÇÃO E DESFECHO OPERACIONAL:\n"
-                            "- Monte a narrativa em ordem cronológica impecável, formal e limpa.\n"
-                            "- Extraia dados de placas, avarias ou crachás caso haja imagens anexadas e documente de forma técnica.\n"
-                            "- DESFECHO OBRIGATÓRIO: Crie subseções claras ao final detalhando:\n"
-                            "  1. PROVINDÊNCIAS IMEDIATAS: O que foi resolvido no local.\n"
-                            "  2. REGISTRO DE VÍTIMAS: Declaração explícita sobre a integridade física das partes e socorro se houver.\n"
-                            "  3. ANÁLISE DE SEGURANÇA (NEAR MISS): Classifique explicitamente sob o conceito de 'Near Miss' (Quase Acidente) se o evento envolveu riscos operacionais, acidentes de trajeto internos ou batidas com potencial de lesão, para fins de melhoria contínua de segurança do trabalho.\n"
-                            "  4. DIRECIONAMENTO: Nota expressa encaminhando o documento ao Gerente de Área responsável para ciência e ações corretivas.\n\n"
-                            
-                            f"Relato para formatação:\n{relato_bruto}"
-                        )
+            CATEGORIA DA OCORRÊNCIA: {tipo_ocorrencia}
 
-                        conteudo_para_enviar = [prompt_execucao_gemini]
-                        if imagem_carregada is not None:
-                            conteudo_para_enviar.append(imagem_carregada)
+            CHECKLIST EXIGIDO QUE DEVE SER CONFERIDO:
+            {checklist_especifico}
 
-                        response = model.generate_content(conteudo_para_enviar)
+            RELATO DO VIGILANTE:
+            "{relato_bruto}"
 
-                        st.success("✨ Boletim Auditado e Emitido com Sucesso!")
-                        st.markdown("### 📋 Documento Oficial Gerado:")
-                        st.markdown(f'<div class="bo-box">{response.text}</div>', unsafe_allow_html=True)
+            RESPOSDA EXCLUSIVAMENTE em formato Markdown bem estruturado:
+            1. **Status de Conformidade**: (Diga se o relato está "COMPLETO" ou "INCOMPLETO" para gerar um BO oficial).
+            2. **Dados Encontrados**: (Liste de forma resumida o que ele informou).
+            3. **Lacunas/Dados Faltantes**: (Aponte CLARAMENTE o que faltou informar de forma direta e amigável, ex: 'Faltou informar a CNH e a filiação do motorista terceiro').
+            """
+            
+            try:
+                response_claude = anthropic_client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=1000,
+                    temperature=0.1,
+                    messages=[{"role": "user", "content": prompt_auditoria}]
+                )
+                resultado_auditoria = response_claude.content[0].text
+                st.markdown("### 📋 Análise de Dados (Claude 3.5 Sonnet)")
+                st.markdown(resultado_auditoria)
+            except Exception as e:
+                st.error(f"Erro ao processar auditoria com o Claude: {e}")
+                resultado_auditoria = "Erro na auditoria."
 
-                    except Exception as e:
-                        st.error(f"Erro na produção do Gemini: {e}")
+        # --- FASE 2: O GEMINI GERA O COMPILADO DO BO PADRÃO STELLANTIS ---
+        with st.spinner("⚡ O Gemini está estruturando o Boletim de Ocorrência oficial..."):
+            prompt_bo = f"""
+            Você é um redator sênior de segurança corporativa especializado em relatórios industriais padrão Stellantis.
+            Pegue o relato bruto fornecido pelo vigilante, as validações feitas pelo auditor, e estruture um Boletim de Ocorrência Eletrônico limpo, formal, sem erros de digitação e extremamente profissional.
+
+            Caso faltem dados (como filiação, CNH, líder solicitante), deixe o campo indicado como "[NÃO INFORMADO]" para que possa ser preenchido manualmente depois.
+
+            CATEGORIA: {tipo_ocorrencia}
+            RELATO DO VIGILANTE: "{relato_bruto}"
+
+            ESTRUTURE O BO EXATAMENTE NESTES TÓPICOS:
+            ### 🛡️ BOLETIM DE OCORRÊNCIA ELETRÔNICO - EQUIPE BRAVO
+
+            **1. DADOS GERAIS DO ACIONAMENTO**
+            - **Líder Solicitante**: 
+            - **Horário da Solicitação**: 
+            - **Vigilante Relator**: 
+            - **Setor Responsável/Área**: (Qualidade / Reparo / MSO / Logística)
+
+            **2. QUALIFICAÇÃO DOS ENVOLVIDOS**
+            - **Vínculo**: (Funcionário Stellantis / Terceiro)
+            - **Nome Completo**: 
+            - **CNH / Documento**: 
+            - **Telefone de Contato**: 
+            - **Endereço de Residência**: 
+            - **Filiação**: 
+            - **Líder Direto do Envolvido & Tel**: 
+
+            **3. DETALHES DOS MATERIAIS / VEÍCULOS**
+            - **Placa/Prefixo**: 
+            - **MVM / Documentação de Carga**: 
+            - **Danos na Carga / Batidas**: (Sim / Não - Detalhar se houve)
+            - **Peças Avariadas ou Faltantes**: (Descreva as peças e mencione se há desenho/anexo da peça)
+
+            **4. DINÂMICA DOS FATOS & ALEGAÇÃO**
+            - (Formatar o relato cronológico dos fatos, de forma clara e impessoal, incluindo textualmente a ALEGAÇÃO do motorista ou terceiro envolvido).
+
+            **5. PROVIDÊNCIAS ADOTADAS & SOLUÇÃO**
+            - (Descrever qual foi a solução ou desfecho dado pela equipe de segurança no local, se houve Near Miss registrado ou encaminhamento médico).
+            """
+            
+            try:
+                model_gemini = genai.GenerativeModel("gemini-1.5-flash")
+                response_gemini = model_gemini.generate_content(prompt_bo)
+                
+                st.markdown("---")
+                st.markdown("### 📄 Documento Compilado (Gemini 1.5 Flash)")
+                st.code(response_gemini.text, language="markdown")
+                st.success("✨ Boletim gerado com sucesso! Você pode copiar o texto acima e colar no seu sistema ou e-mail de envio.")
+            except Exception as e:
+                st.error(f"Erro ao gerar o documento com o Gemini: {e}")
