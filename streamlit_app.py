@@ -53,7 +53,10 @@ else:
     arquivo_anexado = st.file_uploader("Toque para abrir a câmera ou anexar evidência:", type=["png", "jpg", "jpeg"])
     
     imagem_carregada = None
-    if arquivo_anexado is not None:
+     if arquivo_anexado is not None:
+    imagem_carregada = Image.open(io.BytesIO(arquivo_anexado.read()))
+    st.image(imagem_carregada, caption="📸 Imagem Anexada com Sucesso", use_container_width=True)
+ not None:
         imagem_carregada = Image.open(arquivo_anexado)
         st.image(imagem_carregada, caption="⚡ Evidência anexada com sucesso!", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
