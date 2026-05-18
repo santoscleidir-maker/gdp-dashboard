@@ -58,16 +58,17 @@ except Exception as e:
 
 # 3. INTERFACE DE SELEÇÃO E ENTRADA DE DADOS
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">🚨 Classificação do Evento</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">🚨 Classificação do Evento (Diretrizes Oficiais)</div>', unsafe_allow_html=True)
 
 tipo_ocorrencia = st.selectbox(
-    "Selecione a natureza da ocorrência para direcionar a conferência técnica:",
+    "Selecione a natureza da ocorrência para aplicar o manual técnico:",
     [
         "Selecione uma opção...",
-        "Acidente de Trânsito / Colisão (Vias Internas / Alças / Rotatórias)",
-        "Falha Mecânica / Logística de Carga (Avaria de Carga / Válvulas / Pátios)",
-        "Desvio de Segurança / Quebra de Regra de Ouro (Veículos Móveis / Empilhadeiras)",
-        "Avaria / Danos ao Patrimônio (Qualidade / Reparo / MSO / Portarias)",
+        "Acidente de Trânsito / Colisão / Choque / Abalroamento",
+        "Falha Mecânica / Logística (Excesso de Jornada / Carga Tombada / Danos)",
+        "Desvio de Segurança / Quebra de Regra de Ouro (Empilhadeiras / NR-11)",
+        "Recolhimento em Revista (Notebooks / Celulares / Sem Documentação)",
+        "Controle de Portaria (Instabilidade Ronda / Saída Fora do Horário / Trava Rodas)",
         "🔥 FATO NOVO / Ocorrência Complexa (Sem Modelo Prévio)"
     ]
 )
@@ -76,15 +77,15 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Bloco do Relato Livre
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">📝 Relato Técnico da Ocorrência</div>', unsafe_allow_html=True)
-st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Dite ou escreva focando na localização exata (Galpão, Coluna, Via/Sentido), prefixos de equipamentos, registros/matrículas, alegações e encaminhamentos médicos (CSO).</p>", unsafe_allow_html=True)
+st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Dite ou escreva o relato bruto. Lembre-se: O BO deve ser reportado em até 1 hora após o fato.</p>", unsafe_allow_html=True)
 
 relato_bruto = st.text_area("Descreva os fatos ocorridos no turno:", height=180, placeholder="Ex: No dia tal, às xx:xx, no Galpão X coluna xx, identificamos...")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Bloco de Anexos
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📸 Adicionar Fotos, Documentos ou Desenho da Peça</div>', unsafe_allow_html=True)
-arquivo_anexado = st.file_uploader("Toque para abrir a câmera ou anexar evidências (Fotos, MVM, CNH, Croqui)", type=["png", "jpg", "jpeg"])
+st.markdown('<div class="section-title">📸 Adicionar Evidências Visuais (Fotos do Contexto e Detalhes)</div>', unsafe_allow_html=True)
+arquivo_anexado = st.file_uploader("Anexe evidências (Fotos amplas/fechadas, MVM, CNH, DANFE ou Croqui)", type=["png", "jpg", "jpeg"])
 
 imagem_carregada = None
 if arquivo_anexado is not None:
@@ -95,41 +96,47 @@ if arquivo_anexado is not None:
         st.error(f"Erro ao carregar a imagem: {e}")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. PROCESSAMENTO DOS PROMPTS DINÂMICOS
+# 4. PROCESSAMENTO DOS PROMPTS ENRIQUECIDOS COM O MANUAL
 if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
     if tipo_ocorrencia == "Selecione uma opção...":
         st.warning("Por favor, selecione a natureza da ocorrência antes de continuar.")
     elif relato_bruto.strip() == "":
         st.warning("Por favor, informe o relato da ocorrência antes de continuar.")
     else:
-        # Criação do Checklist Rigoroso baseado nos novos exemplos reais
-        checklist_especifico = """
-        - LOCALIZAÇÃO MICROMÉTRICA: Especificar detalhadamente o ponto exato da planta (Ex: Galpão XX e número das Colunas correspondentes, Alça de acesso, Km, Sentido da Via interna ou Portaria de controle).
-        - RASTREABILIDADE TOTAL: Nome completo dos envolvidos, cruzamento de dados (Vínculo: Interno/Terceiro), matrículas, registros funcionais, telefones, RG/CPF, CNH com vencimento, endereço residencial e filiação completa (Pai e Mãe).
-        - DADOS DOS EQUIPAMENTOS/CARGA: Placas combinadas (Cavalete e Carreta/Sider), fornecedor, transportadora, número do documento fiscal ou MVM, prefixo e modelo de empilhadeiras ou frotas internas.
-        - LIDERANÇAS E ACIONAMENTOS: Nomes e registros das lideranças cientes de AMBAS AS PARTES envolvidas, identificação de quem solicitou o apoio da segurança patrimonial e a hora exata do chamado.
-        - ALEGAÇÃO CRUCIAL: Registro textual e detalhado da alegação apresentada pelo motorista ou funcionário envolvido.
-        - DANOS MATERIAIS ESPECÍFICOS: Listagem minuciosa dos danos, avarias pré-existentes, peças faltantes ou necessidade de desenho técnico da peça.
-        - ENCAMINHAMENTO E STATUS TÉCNICO: O caso segue em aberto ou foi concluído? Houve acionamento/atendimento médico no CSO (mencionar nomes da equipe de enfermagem ou médicos e CRM)? Houve autoria técnica da Segurança do Trabalho (SESMT), emissão de Notificação de Consequências ou classificação da gravidade (Ex: Falta Grave)?
+        
+        # DEFINIÇÃO DO BANCO DE DIRETRIZES DA PÁGINA 3 E DO MANUAL
+        diretrizes_conhecimento = """
+        DIRETRIZES OBRIGATÓRIAS DO MANUAL (PÁGINA 3):
+        1. Clareza e Objetividade: Texto estritamente técnico e factual. Sem opiniões pessoais ou termos subjetivos.
+        2. Rastreabilidade de Terceiros: Para motoristas/prestadores externos, é OBRIGATÓRIO constar: RG/CPF, CNH com vencimento, telefone, endereço residencial e FILIAÇÃO COMPLETA (Pai e Mãe).
+        3. Identificação de Lideranças: Exigir nome, sobrenome e registro do Líder, Supervisor ou Gerente da área responsável (Team Leaders não respondem administrativamente).
+        4. Regra de Fotos: Devem ser registradas fotos amplas (para contexto) e fechadas (para foco no dano/placa/etiqueta).
+        5. Prazo Operacional: O fato precisa ser reportado em até 1 hora no sistema.
+        6. Protocolo de Acidentes/Incidentes: Todo evento com lesão ou acidente móvel exige conferir se houve acionamento do Técnico de Segurança do Trabalho, encaminhamento compulsório ao CSO, identificação da equipe médica que atendeu (médico/enfermeiro e CRM) e o desfecho clínico (retorno ao trabalho ou residência).
+        7. Terminologia de Trânsito: Proibido usar o termo genérico 'danificado'. Use termos específicos: amassado, quebrado, riscado, trincado. Diferencie:
+           - COLISÃO: Impacto geral entre corpos.
+           - CHOQUE: Veículo em movimento contra obstáculo ou veículo parado.
+           - ABALROAMENTO: Impacto lateral entre dois veículos em movimento.
+        8. Casos de Revista/Notebooks: Rastrear marcas, patrimônios, etiquetas QR Code e conferir destinação à Alfândega.
+        9. Casos de Logística/Carga: Conferir notas DANFE, códigos de desenho de peças, número de MVM e cumprimento da Lei 13.103 de limite de 5 horas de jornada física do motorista.
         """
 
-        # --- FASE 1: O CLAUDE VALIDA O CHECKLIST ---
-        with st.spinner("🕵️ O Claude está auditando os dados do relato..."):
+        # --- FASE 1: O CLAUDE VALIDA BASEADO NAS REGRAS INJETADAS ---
+        with st.spinner("🕵️ O Claude está auditando com base nas regras do Manual Técnico..."):
             prompt_auditoria = f"""
-            Você é um auditor sênior de segurança patrimonial e compliance industrial focado em plantas automotivas complexas.
-            Analise se o relato bruto do vigilante preenche rigidamente todos os requisitos necessários de amarração técnica e rastreabilidade conforme nossos padrões operacionais.
+            Você é um auditor sênior de segurança patrimonial industrial da Stellantis.
+            Sua missão é confrontar o relato do vigilante contra a nossa base de conhecimento oficial e apontar lacunas.
 
-            CATEGORIA SELECIONADA: {tipo_ocorrencia}
-            CHECKLIST DE CONFERÊNCIA EXIGIDO:
-            {checklist_especifico}
+            BASE DE CONHECIMENTO TÉCNICA DO SISTEMA:
+            {diretrizes_conhecimento}
 
-            RELATO COLETADO:
-            "{relato_bruto}"
+            CATEGORIA DA OCORRÊNCIA SELECIONADA: {tipo_ocorrencia}
+            RELATO DO TURNO: "{relato_bruto}"
 
             RESPONDA EXCLUSIVAMENTE em formato Markdown bem estruturado:
-            1. **Status de Conformidade**: (COMPLETO ou INCOMPLETO).
-            2. **Dados Críticos Encontrados**: (Destaque Local exato/Colunas, Envolvidos, Líderes e Horários identificados).
-            3. **Lacunas Operacionais**: (Indique com clareza amigável e direta quais dados fundamentais faltaram no relato, como: 'Faltou indicar a coluna do galpão', 'Faltou o registro do líder', 'Não consta se o envolvido foi direcionado ao CSO', etc).
+            1. **Status de Conformidade**: (COMPLETO se tiver tudo, ou INCOMPLETO se faltar dados).
+            2. **Análise de Rastreabilidade**: (Liste o que foi identificado: locais/colunas, nomes, documentos, placas).
+            3. **Lacunas Conforme Página 3**: (Aponte estritamente o que o vigilante esqueceu com base no manual, como falta de filiação, falta de dados de quem atendeu no CSO, uso do termo inadequado 'danificado', falta do registro do supervisor, ou estouro do prazo de 1 hora).
             """
             
             try:
@@ -140,17 +147,19 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
                     messages=[{"role": "user", "content": prompt_auditoria}]
                 )
                 resultado_auditoria = response_claude.content[0].text
-                st.markdown("### 📋 Análise de Dados (Claude 3.5 Sonnet)")
+                st.markdown("### 📋 Auditoria de Conformidade (Claude 3.5 - Regras do Manual)")
                 st.markdown(resultado_auditoria)
             except Exception as e:
-                st.error(f"Erro ao processar auditoria com o Claude: {e}")
+                st.error(f"Erro na auditoria: {e}")
                 resultado_auditoria = "Erro na auditoria."
 
-        # --- FASE 2: O GEMINI GERA O BO PADRÃO DE EXCELÊNCIA ---
-        with st.spinner("⚡ O Gemini está padronizando o Boletim de Ocorrência oficial..."):
+        # --- FASE 2: O GEMINI FORMATA O BO PADRÃO DE EXCELÊNCIA ---
+        with st.spinner("⚡ O Gemini está estruturando o Boletim de Ocorrência oficial..."):
             prompt_bo = f"""
-            Você é um redator especialista em segurança corporativa de alta performance. Pegue o relato do vigilante e as considerações da auditoria e compile um Boletim de Ocorrência Interno oficial, extremamente técnico, impessoal, sem erros gramaticais e perfeitamente estruturado.
-            Campos não mencionados no texto bruto devem ser identificados formalmente como "[NÃO INFORMADO]" para preenchimento posterior.
+            Você é um redator especialista em segurança corporativa industrial. Pegue o relato do vigilante e as considerações da auditoria e compile um Boletim de Ocorrência Interno oficial padrão Stellantis.
+            Campos que não foram informados no texto bruto devem ficar marcados formalmente como "[NÃO INFORMADO]" para que fiquem evidentes.
+
+            {diretrizes_conhecimento}
 
             RELATO DO VIGILANTE: "{relato_bruto}"
 
@@ -158,14 +167,13 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
             ### 🛡️ BOLETIM DE OCORRÊNCIA INTERNO - SQUAD BRAVO
 
             **1. DADOS DE CONTROLE & ACIONAMENTO**
-            - **Data/Hora do Evento**: 
-            - **Localização Exata**: (Indicar Galpão, Coluna, Bloco, Sentido da Via ou Alça de Acesso Interna)
-            - **Líder Solicitante & Registro**: 
-            - **Horário do Acionamento da Segurança**: 
+            - **Data/Hora do Fato**: 
+            - **Localização Exata**: (Indicar Galpão, Coluna específica, Prédio, Sentido da Via ou Portaria)
+            - **Líder/Supervisor Solicitante & Registro**: 
+            - **Horário do Chamado**: 
             - **Vigilante Relator / Registro**: 
 
-            **2. QUALIFICAÇÃO CRUZADA DOS ENVOLVIDOS**
-            *(Replique este bloco se houver mais de um condutor, colaborador ou operador)*
+            **2. QUALIFICAÇÃO CRUZADA DOS ENVOLVIDOS (RASTREAMENTO PÁG 3)**
             - **Vínculo**: (Colaborador Interno / Terceiro / Prestador / Fornecedor)
             - **Nome Completo**: 
             - **Matrícula / Registro Funcional**: 
@@ -174,24 +182,23 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
             - **Habilitação (CNH / Vencimento)**: 
             - **Telefone de Contato**: 
             - **Endereço Residencial**: 
-            - **Filiação Completa**: 
-            - **Liderança Direta da Parte (Nome, Registro e Contato)**: 
+            - **Filiação Completa (Pai e Mãe)**: 
+            - **Supervisor Direto da Parte (Nome, Registro e Contato)**: 
 
             **3. DADOS DE ATIVOS / VEÍCULOS / LOGÍSTICA**
             - **Equipamento/Veículo**: (Modelo, Marca, Prefixo ou Placas Combinadas de Carreta/Sider)
-            - **Documentação de Carga**: (MVM / Manifesto de Resíduos / Nota Fiscal)
-            - **Danos Materiais Especificados**: (Listagem detalhada das avarias encontradas ou avarias pré-existentes identificadas na inspeção)
-            - **Peças Faltantes ou Avariadas**: 
+            - **Documentação de Carga/Material**: (MVM / DANFE / Patrimônio do Notebook / Termos de Liberação)
+            - **Danos Materiais Especificados**: (Listagem detalhada usando os termos técnicos exatos: amassado, quebrado, riscado, trincado. Liste também avarias pré-existentes se houver)
 
             **4. DINÂMICA COMPLETA DOS FATOS & ALEGAÇÃO**
             - (Narrativa cronológica clara, impessoal e detalhada sobre o acontecimento).
-            - **Alegação Coletada**: (Transcrição ou síntese formal da alegação de defesa ou justificativa apresentada pelo envolvido principal).
+            - **Alegação Coletada**: (Transcrição formal da justificativa apresentada pelo envolvido principal).
 
             **5. TRATATIVAS TÉCNICAS, ADMINISTRATIVAS & STATUS**
             - **Status Vigente do Caso**: (CONCLUÍDO NO LOCAL / EM ABERTO PARA INVESTIGAÇÃO)
-            - **Resolução Operacional Imediata**: (Medidas tomadas pela equipe no local do fato)
-            - **Suporte Médico / CSO**: (Dados de encaminhamento ao CSO, atendimento por enfermagem/médicos e CRM, se aplicável)
-            - **Segurança do Trabalho (SESMT)**: (Envolvimento da Segurança do Trabalho, Enquadramento em Regras de Ouro, Classificação da Gravidade como Falta Grave/Média/Leve ou Emissão de Notificação de Consequências com dados do emissor)
+            - **Resolução Operacional Imediata**: (Medidas tomadas pela equipe no local do fato, destinação de materiais à qualidade ou retenção)
+            - **Suporte Médico / CSO**: (Dados de encaminhamento ao CSO, atendimento por enfermagem/médicos, CRM e desfecho clínico, se aplicável)
+            - **Segurança do Trabalho (SESMT)**: (Envolvimento do Técnico de Segurança, Enquadramento em Regras de Ouro como a nº 8, Classificação da Gravidade ou Emissão de Notificação de Consequências)
             """
             
             try:
@@ -201,6 +208,6 @@ if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
                 st.markdown("---")
                 st.markdown("### 📄 Documento Compilado (Gemini 1.5 Flash)")
                 st.code(response_gemini.text, language="markdown")
-                st.success("✨ Boletim técnico gerado com sucesso! Pronto para ser extraído e enviado para a gerência.")
+                st.success("✨ Boletim técnico blindado e gerado com sucesso!")
             except Exception as e:
-                st.error(f"Erro ao gerar o documento com o Gemini: {e}")
+                st.error(f"Erro ao gerar o documento: {e}")
