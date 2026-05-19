@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+import time  # Importação adicionada para controlar o tempo de reconexão
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,7 +23,7 @@ MODEL_HINTS = {
     "📦 Carga Tombada / Peças Molhadas / Danos em Racks": "Exigir dados de carga, transportadora, motorista, MVM, DANFE, rack e destino da avaliação.",
     "❌ Recusa de Carga / Divergência Fiscal / Excesso de Jornada": "Exigir dados de transporte, horários, placas, MVM e justificativas formais.",
     "Acidente de Trânsito / Colisão Interna (Choque ou Abalroamento)": "Exigir veículos, placas, chassi, tipo de impacto, danos por lado e desfecho com CSO/TST/ambulância se houver.",
-    "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)": "Exigir relato objetivo, identificação completa, liderança responsável e providências.",
+    "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)": "Exigir relato objective, identificação completa, liderança responsável e providências.",
     "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)": "Exigir portaria, item recolhido, documentação, guarda de objetos e providência tomada.",
 }
 
@@ -67,6 +68,10 @@ def get_api_key() -> Optional[str]:
         key = None
     if not key:
         key = os.getenv("GEMINI_API_KEY")
+        
+    # CORREÇÃO CRÍTICA: Limpa espaços e aspas extras colados pelo celular
+    if key:
+        key = key.strip().replace('"', '').replace("'", "")
     return key
 
 
@@ -329,14 +334,27 @@ def main() -> None:
     prompt = build_prompt(payload)
     parts: List[Any] = [prompt] + evidencias_pil
 
+    # CORREÇÃO CRÍTICA INTEGRADA: Processamento Inteligente com 3 tentativas contra quedas de sinal
     with st.spinner("Processando o relato com a Skill BO..."):
-        try:
-            response = model.generate_content(parts)
-            texto = getattr(response, "text", "") or ""
-            parsed = parse_json_response(texto)
-        except Exception as exc:
-            st.error(f"Erro ao processar o relatório: {exc}")
-            st.stop()
+        texto = ""
+        parsed = None
+        
+        for tentativa in range(3):
+            try:
+                response = model.generate_content(parts)
+                texto = getattr(response, "text", "") or ""
+                parsed = parse_json_response(texto)
+                
+                # Se obteve sucesso na resposta e na conversão do JSON, encerra as tentativas
+                if parsed:
+                    break
+            except Exception as exc:
+                if tentativa < 2:
+                    st.warning(f"⚠️ Conexão oscilando na planta. Tentativa {tentativa + 1} de 3... Reconectando em 2s.")
+                    time.sleep(2)
+                else:
+                    st.error(f"❌ Erro definitivo de comunicação com o servidor: {exc}")
+                    st.stop()
 
     if not parsed:
         st.warning("O modelo não retornou JSON válido. Exibindo a resposta bruta para revisão.")
