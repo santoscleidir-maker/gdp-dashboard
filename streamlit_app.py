@@ -1,199 +1,389 @@
-import streamlit as st
-import google.generativeai as genai
-import PIL.Image as PILImage
 import io
+import json
+import os
+import re
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-# 1. CONFIGURAÇÃO DA PÁGINA E IDENTIDADE VISUAL
-st.set_page_config(
-    page_title="Sentinela Bravo - BO Eletrônico",
-    page_icon="🛡️",
-    layout="centered"
-)
+import google.generativeai as genai
+import streamlit as st
+from PIL import Image
 
-# Injeção de Meta Tags para transformar a página em Aplicativo de Celular
-st.markdown("""
-    <head>
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="Sentinela Bravo">
-        <meta name="mobile-web-app-capable" content="yes">
-        <link rel="apple-touch-icon" href="sentinela_icon_192.jpg">
-        <link rel="icon" sizes="192x192" href="sentinela_icon_192.jpg">
-    </head>
-""", unsafe_allow_html=True)
 
-# Estilização profissional em modo escuro padrão Stellantis
-st.markdown("""
-    <style>
-    .main { background-color: #0d1117; }
-    h1 { color: #f97316; text-align: center; margin-bottom: 0px; }
-    .subtitle { color: #8b949e; text-align: center; font-size: 1.1rem; margin-bottom: 2rem; }
-    .section-card {
-        background-color: #161b22;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #30363d;
-        margin-bottom: 15px;
-    }
-    .section-title {
-        color: #f97316;
-        font-size: 1.2rem;
-        font-weight: bold;
-        margin-bottom: 10px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+APP_TITLE = "Sentinela Bravo — Skill BO"
+MODEL_NAME = "gemini-1.5-flash"
+MAX_IMAGES = 5
+MAX_IMAGE_WIDTH = 1280
+JPEG_QUALITY = 78
 
-# Carrega o brasão oficial do Sentinela
-try:
-    logo_sentinela = PILImage.open("sentinela_icon_192.jpg")
-    st.image(logo_sentinela, width=150)
-except:
-    pass
 
-st.title("Sentinela Bravo")
-st.markdown("<p class='subtitle'>Boletim de Ocorrência Eletrônico Inteligente • Planta Industrial</p>", unsafe_allow_html=True)
+MODEL_HINTS = {
+    "🔥 GERAR BOLETIM UNIVERSAL (Qualquer Modelo do Manual)": "Use o modelo mais aderente ao manual para a situação descrita.",
+    "📦 Carga Tombada / Peças Molhadas / Danos em Racks": "Exigir dados de carga, transportadora, motorista, MVM, DANFE, rack e destino da avaliação.",
+    "❌ Recusa de Carga / Divergência Fiscal / Excesso de Jornada": "Exigir dados de transporte, horários, placas, MVM e justificativas formais.",
+    "Acidente de Trânsito / Colisão Interna (Choque ou Abalroamento)": "Exigir veículos, placas, chassi, tipo de impacto, danos por lado e desfecho com CSO/TST/ambulância se houver.",
+    "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)": "Exigir relato objetivo, identificação completa, liderança responsável e providências.",
+    "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)": "Exigir portaria, item recolhido, documentação, guarda de objetos e providência tomada.",
+}
 
-# 2. VALIDAÇÃO DE CHAVE DE API (Apenas Gemini agora)
-if "GEMINI_API_KEY" not in st.secrets:
-    st.error("Erro: Certifique-se de configurar GEMINI_API_KEY nas Configurações do Streamlit.")
-    st.stop()
 
-try:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model_gemini = genai.GenerativeModel("gemini-1.5-flash")
-except Exception as e:
-    st.error(f"Erro ao inicializar o motor do sistema: {e}")
-    st.stop()
-
-# 3. INTERFACE DE SELEÇÃO E ENTRADA DE DADOS
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">🚨 Natureza da Ocorrência Operacional</div>', unsafe_allow_html=True)
-
-tipo_ocorrencia = st.selectbox(
-    "Selecione a opção correspondente para a triagem:",
-    [
-        "🔥 GERAR BOLETIM UNIVERSAL (Qualquer Modelo do Manual)",
-        "📦 Carga Tombada / Peças Molhadas / Danos em Racks",
-        "❌ Recusa de Carga / Divergência Fiscal / Excesso de Jornada",
-        "Acidente de Trânsito / Colisão Interna (Choque ou Abalroamento)",
-        "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)",
-        "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)"
-    ]
-)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Bloco do Relato Livre
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📝 Relato Técnico da Ocorrência</div>', unsafe_allow_html=True)
-st.markdown("<p style='color:#8b949e; font-size:0.9rem;'>Escreva ou dite o relato bruto do seu turno. A IA vai enquadrar o texto no padrão oficial automaticamente.</p>", unsafe_allow_html=True)
-
-relato_bruto = st.text_area("Descreva os fatos ocorridos no turno:", height=180, placeholder="Ex: Acionados pelo líder às xx:xx, informando sobre...")
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Bloco de Anexos com Compactação Ativa
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📸 Adicionar Evidências Visuais (Compactação Ativa)</div>', unsafe_allow_html=True)
-arquivo_anexado = st.file_uploader("Anexe evidências (Fotos, MVM, CNH, DANFE ou Croqui)", type=["png", "jpg", "jpeg"])
-
-imagem_compactada = None
-if arquivo_anexado is not None:
-    try:
-        dados_da_imagem = arquivo_anexado.read()
-        img_original = PILImage.open(io.BytesIO(dados_da_imagem))
-        
-        if img_original.width > 1280:
-            proporcao = 1280 / float(img_original.width)
-            altura_alvo = int((float(img_original.height) * float(proporcao)))
-            img_original = img_original.resize((1280, altura_alvo), resample=3) 
-        
-        buffer_ram = io.BytesIO()
-        if img_original.mode in ("RGBA", "P"):
-            img_original = img_original.convert("RGB")
-            
-        img_original.save(buffer_ram, format="JPEG", quality=75, optimize=True)
-        buffer_ram.seek(0)
-        
-        imagem_compactada = PILImage.open(buffer_ram)
-        st.image(imagem_compactada, caption="📸 Foto Otimizada com Sucesso (Memória Protegida)", use_container_width=True)
-        
-        if st.button("🗑️ Remover/Deletar Foto Atual"):
-            st.rerun()
-            
-    except Exception as e:
-        st.error(f"Erro ao otimizar imagem: {e}")
-st.markdown('</div>', unsafe_allow_html=True)
-
-# 4. PROCESSAMENTO INTEGRADO E SEGURO (MÁXIMA ESTABILIDADE)
-if st.button("🚀 ENVIAR PARA PROCESSAMENTO"):
-    if relato_bruto.strip() == "":
-        st.warning("Por favor, informe o relato da ocorrência antes de continuar.")
-    else:
-        
-        # PROMPT COMPILADO DE AUDITORIA E FORMATAÇÃO (TUDO EM 1)
-        prompt_unico = f"""
-        Você é o assistente oficial de Inteligência Artificial do Squad Bravo, especializado em segurança patrimonial industrial da Stellantis.
-        Sua missão é ler o relato bruto do vigilante, identificar qual é a natureza da ocorrência (dentre os mais de 10 modelos existentes no manual corporativo) e devolver duas seções claras.
-
-        DIRETRIZES DA PÁGINA 3 DO MANUAL:
-        - Linguagem puramente técnica, factual, impessoal e sem adjetivos subjetivos.
-        - Exigência de rastreamento total: identificação de lideranças, dados completos de motoristas/colaboradores (CNH, RG, CPF, contato, endereço e filiação completa) e documentos de carga (DANFE/MVM).
-        - Uso de termos exatos para avarias: amassado, riscado, quebrado, trincado.
-
-        NATUREZA SELECIONADA OU IDENTIFICADA: {tipo_ocorrencia}
-        RELATO DO VIGILANTE: "{relato_bruto}"
-
-        RESPONDA EXCLUSIVAMENTE NO SEGUINTE FORMATO:
-
-        ## 📋 AUDITORIA DE CONFORMIDADE (REGRAS DO MANUAL)
-        - **Modelo de BO Identificado**: (Indique qual dos modelos do manual se aplica a este caso)
-        - **Dados Críticos Localizados**: (Liste o que o vigilante informou de correto)
-        - **Lacunas / O que falta coletar**: (Aponte quais dados cruciais da Página 3 ou do modelo específico ficaram faltando para fechar o caso com perfeição. Se estiver completo, elogie o preenchimento)
-
-        ---
-
-        ## 📄 BOLETIM DE OCORRÊNCIA INTERNO ESTRUTURADO
-
-        ### 🛡️ SQUAD BRAVO - RELATÓRIO OPERACIONAL
-
-        **1. DADOS DE CONTROLE & ACIONAMENTO**
-        - **Data/Hora do Fato**: [Extrair do texto ou marcar como NÃO INFORMADO]
-        - **Localização Exata**: (Galpão, Coluna específica, Prédio, Sentido da Via ou Portaria)
-        - **Líder/Supervisor Solicitante & Registro**: 
-        - **Horário do Chamado**: 
-        - **Vigilante Relator / Registro**: 
-
-        **2. QUALIFICAÇÃO CRUZADA DOS ENVOLVIDOS (RASTREAMENTO PÁG 3)**
-        - **Vínculo**: (Colaborador Interno / Terceiro / Prestador / Fornecedor)
-        - **Nome Completo**: 
-        - **Matrícula / Registro Funcional**: 
-        - **Empresa / Transportadora / Fornecedor**: 
-        - **Documentos (RG/CPF)**: 
-        - **Habilitação (CNH / Vencimento)**: 
-        - **Telefone de Contato**: 
-        - **Endereço Residencial**: 
-        - **Filiação Completa (Nome do Pai e da Mãe)**: 
-        - **Supervisor Direto da Parte (Nome, Registro e Contato)**: 
-
-        **3. DADOS DE ATIVOS / VEÍCULOS / LOGÍSTICA**
-        - **Equipamento/Veículo**: (Modelo, Marca, Prefixo de Empilhadeira, Placas de Carreta ou identificação de Notebook/Objetos)
-        - **Documentação de Carga/Material**: (MVM / DANFE / Termo de Responsabilidade / Código de Desenho da Peça)
-        - **Danos Materiais Especificados**: (Listagem detalhada das avarias encontradas: amassado, quebrado, riscado, trincado. Se não houver, citar 'Sem avarias')
-
-        **4. DINÂMICA COMPLETA DOS FATOS & ALEGAÇÃO**
-        - (Narrativa cronológica detalhada, impessoal e clara dos fatos baseada no relato bruto).
-        - **Alegação Coletada**: (Transcrição formal da justificativa apresentada pelo envolvido principal).
-
-        **5. TRATATIVAS TÉCNICAS, ADMINISTRATIVAS & STATUS**
-        - **Status Vigente do Caso**: (CONCLUÍDO NO LOCAL / EM ABERTO PARA INVESTIGAÇÃO)
-        - **Resolução Operacional Imediata**: (Medidas tomadas pela equipe: destinação de materiais, acionamento de manutenção, liberação com crachá manual, etc.)
-        - **Segurança do Trabalho / Suporte Técnico**: (Registro se houve acompanhamento do SESMT, CSO ou supervisão da área, conforme aplicável para a natureza do fato)
+def init_page() -> None:
+    st.set_page_config(page_title=APP_TITLE, page_icon="🛡️", layout="centered")
+    st.markdown(
         """
-        
-        with st.spinner("⚡ O Gemini está analisando as regras e estruturando o seu documento oficial..."):
-            try:
-                response = model_gemini.generate_content(prompt_unico)
-                st.markdown(response.text)
-                st.success("✨ Processamento concluído com sucesso e sem erros!")
-            except Exception as e:
-                st.error(f"Erro ao processar o relatório: {e}")
+        <style>
+        .main { background-color: #0d1117; }
+        h1, h2, h3 { color: #f97316; }
+        .subtitle {
+            color: #8b949e;
+            text-align: center;
+            font-size: 1.02rem;
+            margin-bottom: 1.2rem;
+        }
+        .section-card {
+            background-color: #161b22;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid #30363d;
+            margin-bottom: 14px;
+        }
+        .section-title {
+            color: #f97316;
+            font-size: 1.08rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def get_api_key() -> Optional[str]:
+    key = None
+    try:
+        key = st.secrets.get("GEMINI_API_KEY")
+    except Exception:
+        key = None
+    if not key:
+        key = os.getenv("GEMINI_API_KEY")
+    return key
+
+
+@st.cache_resource(show_spinner=False)
+def get_model(api_key: str) -> Any:
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel(MODEL_NAME)
+
+
+def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
+    raw = uploaded_file.read()
+    img = Image.open(io.BytesIO(raw))
+
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    img.thumbnail((MAX_IMAGE_WIDTH, MAX_IMAGE_WIDTH))
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return buffer.getvalue(), img
+
+
+def safe_date_str(dt: datetime) -> str:
+    return dt.strftime("%d/%m/%Y %H:%M")
+
+
+def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+def build_prompt(payload: Dict[str, Any]) -> str:
+    return f"""
+Você é a Skill BO Sentinela Bravo.
+
+Regras obrigatórias do manual:
+- Linguagem clara, objetiva, factual e sem opinião pessoal.
+- Não invente dados.
+- Quando um dado não for informado, escreva exatamente "NÃO INFORMADO".
+- A hora deve ser a hora do fato, não a hora do preenchimento.
+- Para pessoas sem vínculo com a Stellantis, use documento de identificação; para motoristas de transportadora, inclua endereço e filiação.
+- Em acidentes, inclua CSO, TST, ambulância e desfecho somente se essas informações existirem no relato.
+- Em fotos, respeite o tipo de ocorrência: imagens amplas para contexto; colisões exigem detalhes dos danos; carga tombada exige placa legível e demonstração da carga; ronda exige identificação do local e do fato.
+
+Tarefa:
+1) Fazer auditoria de conformidade com o manual.
+2) Gerar o boletim interno estruturado.
+3) Indicar lacunas de coleta sem inventar dados.
+
+Formato de saída obrigatório:
+{{
+  "audit": {{
+    "modelo_identificado": "",
+    "conformidade": "",
+    "dados_criticos_localizados": [],
+    "lacunas": []
+  }},
+  "bo": {{
+    "data_hora_fato": "",
+    "local_exato": "",
+    "acionamento": "",
+    "envolvidos": [],
+    "ativos_veiculos_documentos": [],
+    "dinamica": "",
+    "alegacao": "",
+    "providencias": [],
+    "status": "",
+    "anexos_recomendados": []
+  }}
+}}
+
+Dados do formulário:
+{json.dumps(payload, ensure_ascii=False, indent=2)}
+""".strip()
+
+
+def render_kv(label: str, value: Any) -> None:
+    st.markdown(f"**{label}:** {value}")
+
+
+def main() -> None:
+    init_page()
+
+    api_key = get_api_key()
+    if not api_key:
+        st.error("Configure `GEMINI_API_KEY` em `st.secrets` ou nas variáveis de ambiente.")
+        st.stop()
+
+    try:
+        model = get_model(api_key)
+    except Exception as exc:
+        st.error(f"Falha ao inicializar o modelo: {exc}")
+        st.stop()
+
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        try:
+            logo = Image.open("sentinela_icon_192.jpg")
+            st.image(logo, width=96)
+        except Exception:
+            st.write("🛡️")
+    with col2:
+        st.title("Sentinela Bravo")
+        st.markdown(
+            "<p class='subtitle'>Skill BO • Boletim de Ocorrência Eletrônico Inteligente para planta industrial</p>",
+            unsafe_allow_html=True,
+        )
+
+    with st.form("bo_form", clear_on_submit=False):
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🚨 Classificação da ocorrência</div>', unsafe_allow_html=True)
+
+        tipo_ocorrencia = st.selectbox("Modelo principal", list(MODEL_HINTS.keys()))
+        st.caption(MODEL_HINTS[tipo_ocorrencia])
+
+        data_fato = st.date_input("Data da ocorrência")
+        hora_fato = st.time_input("Hora da ocorrência")
+        local_exato = st.text_input(
+            "Local exato do fato",
+            placeholder="Ex.: Portaria 03, baia 02, galpão 04, coluna L/D",
+        )
+        vigilante_relator = st.text_input("Vigilante relator / registro", placeholder="Nome e registro do vigilante")
+        lider_responsavel = st.text_input(
+            "Líder / Supervisor / Gerente responsável",
+            placeholder="Nome e sobrenome",
+        )
+        lider_contato = st.text_input("Contato do líder / supervisor / gerente", placeholder="Telefone ou ramal")
+        acionamento = st.text_area(
+            "Acionamento / providência imediata",
+            placeholder="Ex.: Central 2400 acionada, Inspetoria no local, TST acionado, CSO acionado...",
+            height=90,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📝 Relato bruto</div>', unsafe_allow_html=True)
+        relato_bruto = st.text_area(
+            "Descreva os fatos",
+            height=180,
+            placeholder="Escreva o relato do turno com a maior quantidade possível de detalhes objetivos.",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📎 Dados complementares por tipo</div>', unsafe_allow_html=True)
+
+        dados_complementares: Dict[str, Any] = {}
+
+        if "Carga Tombada" in tipo_ocorrencia:
+            dados_complementares.update(
+                {
+                    "placa_veiculo": st.text_input("Placa do veículo"),
+                    "mvm": st.text_input("MVM"),
+                    "danfe": st.text_input("DANFE"),
+                    "transportadora": st.text_input("Transportadora"),
+                    "fornecedor": st.text_input("Fornecedor"),
+                    "motorista": st.text_input("Nome do motorista"),
+                    "telefone_motorista": st.text_input("Telefone do motorista"),
+                    "rack_codigo": st.text_input("Código do rack / container"),
+                    "descricao_peças": st.text_area("Peças / avarias / quantidade", height=80),
+                }
+            )
+        elif "Colisão" in tipo_ocorrencia or "Choque" in tipo_ocorrencia or "Abalroamento" in tipo_ocorrencia:
+            dados_complementares.update(
+                {
+                    "veiculo_1": st.text_input("Veículo 1"),
+                    "veiculo_2": st.text_input("Veículo 2"),
+                    "danos_veiculo_1": st.text_area("Danos veículo 1", height=70),
+                    "danos_veiculo_2": st.text_area("Danos veículo 2", height=70),
+                    "houve_vitima": st.radio("Houve vítima?", ["Não", "Sim"], horizontal=True),
+                    "cs0_tst_ambulancia": st.text_area("CSO / TST / ambulância / desfecho", height=90),
+                }
+            )
+        elif "Controle de Acesso" in tipo_ocorrencia or "Portaria" in tipo_ocorrencia:
+            dados_complementares.update(
+                {
+                    "nome_colaborador": st.text_input("Nome do colaborador / visitante"),
+                    "matricula": st.text_input("Matrícula / registro"),
+                    "empresa_setor": st.text_input("Empresa / setor"),
+                    "objeto_recolhido": st.text_input("Objeto / equipamento / documento"),
+                    "documentacao": st.text_input("Documentação que acoberta a saída"),
+                    "guarda_objetos": st.text_input("Nº de guarda de objetos / alfândega"),
+                }
+            )
+        else:
+            dados_complementares.update(
+                {
+                    "envolvidos": st.text_area("Envolvidos e dados já levantados", height=90),
+                    "veiculos_documentos": st.text_area("Veículos / documentos / equipamentos", height=90),
+                }
+            )
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📸 Evidências</div>', unsafe_allow_html=True)
+        arquivos = st.file_uploader(
+            "Anexe até 5 imagens",
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        submit = st.form_submit_button("🚀 Gerar BO")
+
+    if not submit:
+        return
+
+    if not relato_bruto.strip():
+        st.warning("Preencha o relato bruto antes de gerar o boletim.")
+        st.stop()
+
+    if not local_exato.strip():
+        st.warning("O local exato do fato é obrigatório.")
+        st.stop()
+
+    if len(arquivos or []) > MAX_IMAGES:
+        st.warning(f"Envie no máximo {MAX_IMAGES} imagens por vez.")
+        st.stop()
+
+    evidencias_pil: List[Image.Image] = []
+    evidencias_info: List[str] = []
+
+    for arquivo in arquivos or []:
+        try:
+            _, pil_img = compress_image(arquivo)
+            evidencias_pil.append(pil_img)
+            evidencias_info.append(arquivo.name)
+        except Exception as exc:
+            st.error(f"Falha ao processar a imagem {arquivo.name}: {exc}")
+            st.stop()
+
+    payload = {
+        "tipo_ocorrencia": tipo_ocorrencia,
+        "data_ocorrencia": data_fato.isoformat(),
+        "hora_ocorrencia": hora_fato.strftime("%H:%M"),
+        "local_exato": local_exato.strip(),
+        "vigilante_relator": vigilante_relator.strip(),
+        "lider_responsavel": lider_responsavel.strip(),
+        "lider_contato": lider_contato.strip(),
+        "acionamento": acionamento.strip(),
+        "relato_bruto": relato_bruto.strip(),
+        "dados_complementares": dados_complementares,
+        "evidencias": evidencias_info,
+        "observacao": "Não inventar dados; usar NÃO INFORMADO quando faltar informação.",
+        "timestamp_geracao": safe_date_str(datetime.now()),
+    }
+
+    prompt = build_prompt(payload)
+    parts: List[Any] = [prompt] + evidencias_pil
+
+    with st.spinner("Processando o relato com a Skill BO..."):
+        try:
+            response = model.generate_content(parts)
+            texto = getattr(response, "text", "") or ""
+            parsed = parse_json_response(texto)
+        except Exception as exc:
+            st.error(f"Erro ao processar o relatório: {exc}")
+            st.stop()
+
+    if not parsed:
+        st.warning("O modelo não retornou JSON válido. Exibindo a resposta bruta para revisão.")
+        st.code(texto)
+        st.stop()
+
+    audit = parsed.get("audit", {})
+    bo = parsed.get("bo", {})
+
+    st.success("Processamento concluído.")
+
+    st.subheader("Auditoria de conformidade")
+    render_kv("Modelo identificado", audit.get("modelo_identificado", "NÃO INFORMADO"))
+    render_kv("Conformidade", audit.get("conformidade", "NÃO INFORMADO"))
+
+    st.markdown("**Dados críticos localizados**")
+    for item in audit.get("dados_criticos_localizados", []):
+        st.write(f"- {item}")
+
+    st.markdown("**Lacunas**")
+    for item in audit.get("lacunas", []):
+        st.write(f"- {item}")
+
+    st.subheader("Boletim estruturado")
+    render_kv("Data/hora do fato", bo.get("data_hora_fato", "NÃO INFORMADO"))
+    render_kv("Local exato", bo.get("local_exato", "NÃO INFORMADO"))
+    render_kv("Acionamento", bo.get("acionamento", "NÃO INFORMADO"))
+    render_kv("Dinâmica", bo.get("dinamica", "NÃO INFORMADO"))
+    render_kv("Alegação", bo.get("alegacao", "NÃO INFORMADO"))
+    render_kv("Status", bo.get("status", "NÃO INFORMADO"))
+
+    st.markdown("**Envolvidos**")
+    for item in bo.get("envolvidos", []):
+        st.write(f"- {item}")
+
+    st.markdown("**Ativos / veículos / documentos**")
+    for item in bo.get("ativos_veiculos_documentos", []):
+        st.write(f"- {item}")
+
+    st.markdown("**Providências**")
+    for item in bo.get("providencias", []):
+        st.write(f"- {item}")
+
+    st.markdown("**Anexos recomendados**")
+    for item in bo.get("anexos_recomendados", []):
+        st.write(f"- {item}")
+
+
+if __name__ == "__main__":
+    main()
