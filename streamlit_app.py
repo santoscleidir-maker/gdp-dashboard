@@ -2,7 +2,6 @@ import io
 import json
 import os
 import re
-import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,56 +11,38 @@ from PIL import Image
 
 APP_TITLE = "Sentinela Bravo — Skill BO"
 
-# Modelos oficiais e atualizados para a cota gratuita
-MODELS_TO_TRY = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash"
-]
-
-MAX_IMAGES = 5
-MAX_IMAGE_WIDTH = 1280
-JPEG_QUALITY = 78
-
-MODEL_HINTS = {
-    "🔥 GERAR BOLETIM UNIVERSAL (Qualquer Modelo do Manual)": "Use o modelo mais aderente ao manual para a situação descrita.",
-    "📦 Carga Tombada / Peças Molhadas / Danos em Racks": "Exigir dados de carga, transportadora, motorista, MVM, DANFE, rack e destino da avaliação.",
-    "❌ Recusa de Carga / Divergência Fiscal / Excesso de Jornada": "Exigir dados de transporte, horários, placas, MVM e justificativas formais.",
-    "Acidente de Trânsito / Colisão Interna (Choque ou Abalroamento)": "Exigir veículos, placas, chassi, tipo de impacto, danos por lado e desfecho com CSO/TST/ambulância se houver.",
-    "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)": "Exigir relato objective, identificação completa, liderança responsável e providências.",
-    "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)": "Exigir portaria, item recolhido, documentação, guarda de objetos e providência tomada.",
-}
+# 1. FUNÇÕES DE SUPORTE NO TOPO (Evita o erro NameError)
+def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            return None
+    return None
 
 def init_page() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon="🛡️", layout="centered")
-    st.markdown(
-        """
-        <style>
-        .main { background-color: #0d1117; }
-        h1, h2, h3 { color: #f97316; }
-        .subtitle { color: #8b949e; text-align: center; font-size: 1.02rem; margin-bottom: 1.2rem; }
-        .section-card { background-color: #161b22; padding: 16px; border-radius: 14px; border: 1px solid #30363d; margin-bottom: 14px; }
-        .section-title { color: #f97316; font-size: 1.08rem; font-weight: 700; margin-bottom: 10px; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 def get_all_api_keys() -> List[str]:
     keys = []
-    possible_secrets = ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"]
-    for secret_name in possible_secrets:
-        key = None
+    for secret_name in ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"]:
         try:
             key = st.secrets.get(secret_name)
         except Exception:
             key = None
+            
         if not key:
             key = os.getenv(secret_name)
+            
         if key:
-            cleaned_key = key.strip().replace('"', '').replace("'", "")
-            if cleaned_key and cleaned_key not in keys:
-                keys.append(cleaned_key)
+            cleaned = key.strip().replace('"', '').replace("'", "")
+            if cleaned and cleaned not in keys:
+                keys.append(cleaned)
     return keys
 
 def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
@@ -69,109 +50,97 @@ def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
     img = Image.open(io.BytesIO(raw))
     if img.mode != "RGB":
         img = img.convert("RGB")
-    img.thumbnail((MAX_IMAGE_WIDTH, MAX_IMAGE_WIDTH))
+    img.thumbnail((1280, 1280))
     buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    img.save(buffer, format="JPEG", quality=78, optimize=True)
     return buffer.getvalue(), img
 
-def safe_date_str(dt: datetime) -> str:
-    return dt.strftime("%d/%m/%Y %H:%M")
+# 2. CONFIGURAÇÕES GLOBAIS
+MODELS_TO_TRY = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash"
+]
 
-def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
-    try:
-        return json.loads(text)
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group(0))
-    except Exception:
-        return None
+MODEL_HINTS = {
+    "🔥 GERAR BOLETIM UNIVERSAL": "Use o modelo padrão para a situação descrita.",
+    "📦 Carga Tombada / Danos em Racks": "Exigir dados de carga, transportadora, motorista, MVM e DANFE.",
+    "❌ Recusa de Carga / Divergência Fiscal": "Exigir dados de transporte, placas, MVM e justificativas.",
+    "🚨 Acidente de Trânsito / Colisão Interna": "Exigir veículos, placas, tipo de impacto e danos por lado.",
+    "🛡️ Desvio de Segurança / Regra de Ouro": "Exigir relato objetivo, identificação e providências.",
+}
 
-def build_prompt(payload: Dict[str, Any]) -> str:
-    return f"""
-Você é a Skill BO Sentinela Bravo.
-Regras: Linguagem clara, factual e sem opinião. Se faltar dado, escreva "NÃO INFORMADO".
-
-Retorne APENAS um JSON puro estruturado:
-{{
-  "audit": {{ "modelo_identificado": "", "conformidade": "" }},
-  "bo": {{ "data_hora_fato": "", "local_exato": "", "dinamica": "", "status": "" }}
-}}
-
-Dados: {json.dumps(payload, ensure_ascii=False)}
-""".strip()
-
-def render_kv(label: str, value: Any) -> None:
-    st.markdown(f"**{label}:** {value}")
-
+# 3. BLOCO PRINCIPAL DO APLICATIVO
 def main() -> None:
     init_page()
     api_keys = get_all_api_keys()
     
+    st.title("🛡️ Sentinela Bravo")
+    
     if not api_keys:
-        st.error("Nenhuma chave configurada. Adicione 'GEMINI_API_KEY' nos Secrets do Streamlit.")
+        st.warning("⚠️ Atenção: Nenhuma chave de API encontrada nos Secrets do Streamlit.")
+        st.info("Por favor, adicione a sua 'GEMINI_API_KEY' nas configurações para ativar o sistema.")
         st.stop()
 
-    st.title("Sentinela Bravo")
-    st.caption("Sistema Anti-Quedas com Rotação de Chaves Ativo.")
+    st.caption("Skill BO operacional com redundância de chaves ativa.")
 
     with st.form("bo_form"):
-        tipo_ocorrencia = st.selectbox("Modelo principal", list(MODEL_HINTS.keys()))
-        local_exato = st.text_input("Local exato do fato")
-        relato_bruto = st.text_area("Descreva os fatos")
-        arquivos = st.file_uploader("Imagens", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-        submit = st.form_submit_button("🚀 Gerar BO")
+        tipo_ocorrencia = st.selectbox("Modelo de Ocorrência", list(MODEL_HINTS.keys()))
+        local_exato = st.text_input("Local exato")
+        relato_bruto = st.text_area("Relato dos fatos")
+        arquivos = st.file_uploader("Evidências (Fotos)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+        submit = st.form_submit_button("🚀 Gerar Relatório")
 
     if submit:
         if not relato_bruto.strip() or not local_exato.strip():
-            st.warning("Preencha os campos obrigatórios.")
+            st.warning("Por favor, preencha o local e o relato.")
             st.stop()
 
         evidencias_pil = []
-        for arquivo in arquivos or []:
-            _, pil_img = compress_image(arquivo)
-            evidencias_pil.append(pil_img)
+        for arq in arquivos or []:
+            try:
+                _, pil_img = compress_image(arq)
+                evidencias_pil.append(pil_img)
+            except Exception:
+                st.error(f"Erro ao processar imagem: {arq.name}")
+                st.stop()
 
         payload = {
-            "tipo_ocorrencia": tipo_ocorrencia,
-            "local_exato": local_exato.strip(),
-            "relato_bruto": relato_bruto.strip(),
-            "timestamp": safe_date_str(datetime.now())
+            "tipo": tipo_ocorrencia,
+            "local": local_exato.strip(),
+            "relato": relato_bruto.strip(),
+            "data_registro": datetime.now().strftime("%d/%m/%Y %H:%M")
         }
 
-        parts = [build_prompt(payload)] + evidencias_pil
-        parsed = None
+        prompt = f"Gere um boletim técnico em formato JSON puro baseado nestes dados: {json.dumps(payload, ensure_ascii=False)}"
+        parts = [prompt] + evidencias_pil
+        parsed_response = None
 
-        # Rotação de chaves à prova de falhas com Try/Except corrigido
-        with st.spinner("Processando relatório com a Skill BO..."):
-            for idx, current_key in enumerate(api_keys):
-                if parsed:
-                    break
-                try:
-                    genai.configure(api_key=current_key)
-                    for model_name in MODELS_TO_TRY:
-                        try:
-                            model = genai.GenerativeModel(model_name)
-                            response = model.generate_content(parts)
-                            if response and hasattr(response, "text"):
-                                parsed = parse_json_response(response.text)
-                                if parsed:
-                                    break
-                        except Exception:
-                            continue
-                except Exception:
-                    st.warning(f"Chave {idx+1} instável. Chaveando rotação...")
-                    continue
+        # Processamento seguro com chaves e modelos
+        for k in api_keys:
+            if parsed_response:
+                break
+            try:
+                genai.configure(api_key=k)
+                for model_name in MODELS_TO_TRY:
+                    try:
+                        model = genai.GenerativeModel(model_name)
+                        res = model.generate_content(parts)
+                        if res and hasattr(res, "text"):
+                            parsed_response = parse_json_response(res.text)
+                            if parsed_response:
+                                break
+                    except Exception:
+                        continue
+            except Exception:
+                continue
 
-        if not parsed:
-            st.error("Cota temporariamente esgotada em todas as chaves gratuitas. Aguarde 60 segundos.")
+        if not parsed_response:
+            st.error("Todas as chaves atingiram o limite da cota gratuita. Aguarde 60 segundos.")
             st.stop()
 
-        st.success("Boletim Gerado!")
-        st.json(parsed)
+        st.success("Relatório processado com sucesso!")
+        st.json(parsed_response)
 
 if __name__ == "__main__":
     main()
