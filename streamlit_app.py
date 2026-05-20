@@ -6,22 +6,17 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-# NOVO SDK — substitui google-generativeai completamente
-from google import genai
-from google.genai import types
-
+import google.generativeai as genai
 import streamlit as st
 from PIL import Image
 
-
 APP_TITLE = "Sentinela Bravo — Skill BO"
 
-# Modelos do novo SDK (nomes corretos em 2025/2026)
-# "gemini-2.5-flash" é o que o usuário chama de "3.5 flash" — não existe 3.5
-CANDIDATE_MODELS = [
-    "gemini-2.5-flash-preview-05-20",  # mais capaz, maio 2025
-    "gemini-2.0-flash",                 # estável e rápido
-    "gemini-2.0-flash-lite",            # fallback leve
+# Ordem de prioridade dos modelos para o fallback
+MODELS_TO_TRY = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite"
 ]
 
 MAX_IMAGES = 5
@@ -37,7 +32,6 @@ MODEL_HINTS = {
     "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)": "Exigir portaria, item recolhido, documentação, guarda de objetos e providência tomada.",
 }
 
-
 def init_page() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon="🛡️", layout="centered")
     st.markdown(
@@ -45,57 +39,54 @@ def init_page() -> None:
         <style>
         .main { background-color: #0d1117; }
         h1, h2, h3 { color: #f97316; }
-        .subtitle { color: #8b949e; text-align: center; font-size: 1.02rem; margin-bottom: 1.2rem; }
-        .section-card { background-color: #161b22; padding: 16px; border-radius: 14px; border: 1px solid #30363d; margin-bottom: 14px; }
-        .section-title { color: #f97316; font-size: 1.08rem; font-weight: 700; margin-bottom: 10px; }
+        .subtitle {
+            color: #8b949e;
+            text-align: center;
+            font-size: 1.02rem;
+            margin-bottom: 1.2rem;
+        }
+        .section-card {
+            background-color: #161b22;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid #30363d;
+            margin-bottom: 14px;
+        }
+        .section-title {
+            color: #f97316;
+            font-size: 1.08rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-
-def get_api_key() -> Optional[str]:
-    key = None
-    try:
-        key = st.secrets.get("GEMINI_API_KEY")
-    except Exception:
+def get_all_api_keys() -> List[str]:
+    """Busca todas as chaves configuradas nos Secrets (GEMINI_API_KEY, GEMINI_API_KEY_2, etc)"""
+    keys = []
+    
+    # Lista de possíveis nomes de chaves nos Secrets
+    possible_secrets = ["GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3"]
+    
+    for secret_name in possible_secrets:
         key = None
-    if not key:
-        key = os.getenv("GEMINI_API_KEY")
-    if key:
-        key = key.strip().replace('"', '').replace("'", "")
-    return key
-
-
-def get_client_and_model(api_key: str) -> Tuple[genai.Client, str]:
-    """
-    Instancia o cliente do novo SDK e valida qual modelo está disponível.
-    Retorna (client, model_name) ou lança RuntimeError.
-    """
-    client = genai.Client(api_key=api_key)
-    last_exc = None
-
-    for model_name in CANDIDATE_MODELS:
         try:
-            # Probe mínimo — 1 token para confirmar que o modelo responde
-            response = client.models.generate_content(
-                model=model_name,
-                contents="ok",
-                config=types.GenerateContentConfig(max_output_tokens=1),
-            )
-            _ = response.text  # levanta exceção se bloqueado
-            return client, model_name
-        except Exception as exc:
-            last_exc = exc
-            continue
-
-    raise RuntimeError(
-        f"Nenhum modelo disponível.\n"
-        f"Último erro: {last_exc}\n"
-        f"Modelos tentados: {CANDIDATE_MODELS}\n"
-        "Verifique sua chave de API e acesse: https://ai.google.dev/gemini-api/docs/models"
-    )
-
+            key = st.secrets.get(secret_name)
+        except Exception:
+            key = None
+            
+        if not key:
+            key = os.getenv(secret_name)
+            
+        if key:
+            # Limpa caracteres invisíveis, aspas ou espaços colados pelo celular
+            cleaned_key = key.strip().replace('"', '').replace("'", "")
+            if cleaned_key and cleaned_key not in keys:
+                keys.append(cleaned_key)
+                
+    return keys
 
 def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
     raw = uploaded_file.read()
@@ -107,301 +98,9 @@ def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
     img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     return buffer.getvalue(), img
 
-
-def pil_to_part(img: Image.Image) -> types.Part:
-    """Converte PIL.Image para types.Part do novo SDK."""
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG")
-    return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
-
-
 def safe_date_str(dt: datetime) -> str:
     return dt.strftime("%d/%m/%Y %H:%M")
 
-
 def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
     try:
-        return json.loads(text)
-    except Exception:
-        pass
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group(0))
-    except Exception:
-        return None
-
-
-def safe_extract_text(response: Any) -> str:
-    try:
-        return response.text or ""
-    except Exception:
-        try:
-            parts = response.candidates[0].content.parts
-            return " ".join(p.text for p in parts if hasattr(p, "text"))
-        except Exception:
-            return ""
-
-
-def build_prompt(payload: Dict[str, Any]) -> str:
-    return f"""
-Você é a Skill BO Sentinela Bravo.
-
-Regras obrigatórias do manual:
-- Linguagem clara, objetiva, factual e sem opinião pessoal.
-- Não invente dados.
-- Quando um dado não for informado, escreva exatamente "NÃO INFORMADO".
-- A hora deve ser a hora do fato, não a hora do preenchimento.
-- Para pessoas sem vínculo com a Stellantis, use documento de identificação; para motoristas de transportadora, inclua endereço e filiação.
-- Em acidentes, inclua CSO, TST, ambulância e desfecho somente se essas informações existirem no relato.
-
-Tarefa:
-1) Fazer auditoria de conformidade com o manual.
-2) Gerar o boletim interno estruturado.
-3) Indicar lacunas de coleta sem inventar dados.
-
-Formato de saída obrigatório (JSON puro, sem markdown, sem texto fora das chaves):
-{{
-  "audit": {{
-    "modelo_identificado": "",
-    "conformidade": "",
-    "dados_criticos_localizados": [],
-    "lacunas": []
-  }},
-  "bo": {{
-    "data_hora_fato": "",
-    "local_exato": "",
-    "acionamento": "",
-    "envolvidos": [],
-    "ativos_veiculos_documentos": [],
-    "dinamica": "",
-    "alegacao": "",
-    "providencias": [],
-    "status": "",
-    "anexos_recomendados": []
-  }}
-}}
-
-Dados do formulário:
-{json.dumps(payload, ensure_ascii=False, indent=2)}
-""".strip()
-
-
-def render_kv(label: str, value: Any) -> None:
-    st.markdown(f"**{label}:** {value}")
-
-
-def main() -> None:
-    init_page()
-
-    api_key = get_api_key()
-    if not api_key:
-        st.error("Configure `GEMINI_API_KEY` em `st.secrets` ou nas variáveis de ambiente.")
-        st.stop()
-
-    try:
-        with st.spinner("Verificando modelo disponível..."):
-            client, model_ativo = get_client_and_model(api_key)
-        st.caption(f"✅ Modelo ativo: `{model_ativo}`")
-    except RuntimeError as exc:
-        st.error(str(exc))
-        st.stop()
-
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        try:
-            logo = Image.open("sentinela bravo.jpg")
-            st.image(logo, width=96)
-        except Exception:
-            st.write("🛡️")
-    with col2:
-        st.title("Sentinela Bravo")
-        st.markdown(
-            "<p class='subtitle'>Skill BO • Boletim de Ocorrência Eletrônico Inteligente para planta industrial</p>",
-            unsafe_allow_html=True,
-        )
-
-    with st.form("bo_form", clear_on_submit=False):
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">🚨 Classificação da ocorrência</div>', unsafe_allow_html=True)
-
-        tipo_ocorrencia = st.selectbox("Modelo principal", list(MODEL_HINTS.keys()))
-        st.caption(MODEL_HINTS[tipo_ocorrencia])
-
-        data_fato = st.date_input("Data da ocorrência")
-        hora_fato = st.time_input("Hora da ocorrência")
-        local_exato = st.text_input("Local exato do fato", placeholder="Ex.: Portaria 03, baia 02, galpão 04, coluna L/D")
-        vigilante_relator = st.text_input("Vigilante relator / registro", placeholder="Nome e registro do vigilante")
-        lider_responsavel = st.text_input("Líder / Supervisor / Gerente responsável", placeholder="Nome e sobrenome")
-        lider_contato = st.text_input("Contato do líder", placeholder="Telefone ou ramal")
-        acionamento = st.text_area("Acionamento / providência imediata", placeholder="Ex.: Central 2400 acionada...", height=90)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">📝 Relato bruto</div>', unsafe_allow_html=True)
-        relato_bruto = st.text_area("Descreva os fatos", height=180, placeholder="Escreva o relato com o máximo de detalhes objetivos.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">📎 Dados complementares</div>', unsafe_allow_html=True)
-
-        dados_complementares: Dict[str, Any] = {}
-
-        if "Carga Tombada" in tipo_ocorrencia:
-            dados_complementares.update({
-                "placa_veiculo": st.text_input("Placa do veículo"),
-                "mvm": st.text_input("MVM"),
-                "danfe": st.text_input("DANFE"),
-                "transportadora": st.text_input("Transportadora"),
-                "fornecedor": st.text_input("Fornecedor"),
-                "motorista": st.text_input("Nome do motorista"),
-                "telefone_motorista": st.text_input("Telefone do motorista"),
-                "rack_codigo": st.text_input("Código do rack / container"),
-                "descricao_pecas": st.text_area("Peças / avarias / quantidade", height=80),
-            })
-        elif any(k in tipo_ocorrencia for k in ["Colisão", "Choque", "Abalroamento"]):
-            dados_complementares.update({
-                "veiculo_1": st.text_input("Veículo 1"),
-                "veiculo_2": st.text_input("Veículo 2"),
-                "danos_veiculo_1": st.text_area("Danos veículo 1", height=70),
-                "danos_veiculo_2": st.text_area("Danos veículo 2", height=70),
-                "houve_vitima": st.radio("Houve vítima?", ["Não", "Sim"], horizontal=True),
-                "cso_tst_ambulancia": st.text_area("CSO / TST / ambulância / desfecho", height=90),
-            })
-        elif any(k in tipo_ocorrencia for k in ["Controle de Acesso", "Portaria"]):
-            dados_complementares.update({
-                "nome_colaborador": st.text_input("Nome do colaborador / visitante"),
-                "matricula": st.text_input("Matrícula / registro"),
-                "empresa_setor": st.text_input("Empresa / setor"),
-                "objeto_recolhido": st.text_input("Objeto / equipamento / documento"),
-                "documentacao": st.text_input("Documentação que acoberta a saída"),
-                "guarda_objetos": st.text_input("Nº de guarda de objetos / alfândega"),
-            })
-        else:
-            dados_complementares.update({
-                "envolvidos": st.text_area("Envolvidos e dados levantados", height=90),
-                "veiculos_documentos": st.text_area("Veículos / documentos / equipamentos", height=90),
-            })
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">📸 Evidências</div>', unsafe_allow_html=True)
-        arquivos = st.file_uploader("Anexe até 5 imagens", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        submit = st.form_submit_button("🚀 Gerar BO")
-
-    if not submit:
-        return
-
-    if not relato_bruto.strip():
-        st.warning("Preencha o relato bruto antes de gerar o boletim.")
-        st.stop()
-    if not local_exato.strip():
-        st.warning("O local exato do fato é obrigatório.")
-        st.stop()
-    if len(arquivos or []) > MAX_IMAGES:
-        st.warning(f"Envie no máximo {MAX_IMAGES} imagens.")
-        st.stop()
-
-    image_parts: List[types.Part] = []
-    evidencias_info: List[str] = []
-
-    for arquivo in arquivos or []:
-        try:
-            _, pil_img = compress_image(arquivo)
-            image_parts.append(pil_to_part(pil_img))  # novo SDK usa Part
-            evidencias_info.append(arquivo.name)
-        except Exception as exc:
-            st.error(f"Falha ao processar {arquivo.name}: {exc}")
-            st.stop()
-
-    payload = {
-        "tipo_ocorrencia": tipo_ocorrencia,
-        "data_ocorrencia": data_fato.isoformat(),
-        "hora_ocorrencia": hora_fato.strftime("%H:%M"),
-        "local_exato": local_exato.strip(),
-        "vigilante_relator": vigilante_relator.strip(),
-        "lider_responsavel": lider_responsavel.strip(),
-        "lider_contato": lider_contato.strip(),
-        "acionamento": acionamento.strip(),
-        "relato_bruto": relato_bruto.strip(),
-        "dados_complementares": dados_complementares,
-        "evidencias": evidencias_info,
-        "observacao": "Não inventar dados; usar NÃO INFORMADO quando faltar informação.",
-        "timestamp_geracao": safe_date_str(datetime.now()),
-    }
-
-    prompt_text = build_prompt(payload)
-
-    # Monta contents para o novo SDK: texto + imagens como Parts
-    contents: List[Any] = [types.Part.from_text(text=prompt_text)] + image_parts
-
-    with st.spinner("Processando o relato com a Skill BO..."):
-        texto = ""
-        parsed = None
-
-        for tentativa in range(3):
-            try:
-                response = client.models.generate_content(
-                    model=model_ativo,
-                    contents=contents,
-                    config=types.GenerateContentConfig(max_output_tokens=4096),
-                )
-                texto = safe_extract_text(response)
-                parsed = parse_json_response(texto)
-                if parsed:
-                    break
-            except Exception as exc:
-                if tentativa < 2:
-                    st.warning(f"⚠️ Tentativa {tentativa + 1} de 3... aguardando 2s.")
-                    time.sleep(2)
-                else:
-                    st.error(f"❌ Erro definitivo: {exc}")
-                    st.stop()
-
-    if not parsed:
-        st.warning("O modelo não retornou JSON válido. Resposta bruta:")
-        st.code(texto)
-        st.stop()
-
-    audit = parsed.get("audit", {})
-    bo = parsed.get("bo", {})
-
-    st.success(f"Processamento concluído com `{model_ativo}`.")
-
-    st.subheader("Auditoria de conformidade")
-    render_kv("Modelo identificado", audit.get("modelo_identificado", "NÃO INFORMADO"))
-    render_kv("Conformidade", audit.get("conformidade", "NÃO INFORMADO"))
-    st.markdown("**Dados críticos localizados**")
-    for item in audit.get("dados_criticos_localizados", []):
-        st.write(f"- {item}")
-    st.markdown("**Lacunas**")
-    for item in audit.get("lacunas", []):
-        st.write(f"- {item}")
-
-    st.subheader("Boletim estruturado")
-    render_kv("Data/hora do fato", bo.get("data_hora_fato", "NÃO INFORMADO"))
-    render_kv("Local exato", bo.get("local_exato", "NÃO INFORMADO"))
-    render_kv("Acionamento", bo.get("acionamento", "NÃO INFORMADO"))
-    render_kv("Dinâmica", bo.get("dinamica", "NÃO INFORMADO"))
-    render_kv("Alegação", bo.get("alegacao", "NÃO INFORMADO"))
-    render_kv("Status", bo.get("status", "NÃO INFORMADO"))
-    st.markdown("**Envolvidos**")
-    for item in bo.get("envolvidos", []):
-        st.write(f"- {item}")
-    st.markdown("**Ativos / veículos / documentos**")
-    for item in bo.get("ativos_veiculos_documentos", []):
-        st.write(f"- {item}")
-    st.markdown("**Providências**")
-    for item in bo.get("providencias", []):
-        st.write(f"- {item}")
-    st.markdown("**Anexos recomendados**")
-    for item in bo.get("anexos_recomendados", []):
-        st.write(f"- {item}")
-
-
-if __name__ == "__main__":
-    main()
+        return json
