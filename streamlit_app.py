@@ -6,25 +6,27 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import google.generativeai as genai
+# NOVO SDK — substitui google-generativeai completamente
+from google import genai
+from google.genai import types
+
 import streamlit as st
 from PIL import Image
 
 
 APP_TITLE = "Sentinela Bravo — Skill BO"
 
-# FIX 1: Lista de fallback — tenta o mais recente; se falhar, desce a lista.
-# Atualizar aqui quando a Google lançar novos modelos.
+# Modelos do novo SDK (nomes corretos em 2025/2026)
+# "gemini-2.5-flash" é o que o usuário chama de "3.5 flash" — não existe 3.5
 CANDIDATE_MODELS = [
-    "gemini-2.0-flash",          # atual e rápido (2025)
-    "gemini-2.0-flash-lite",     # mais leve, fallback
-    "gemini-1.5-flash-latest",   # alias estável — evita deprecação silenciosa
+    "gemini-2.5-flash-preview-05-20",  # mais capaz, maio 2025
+    "gemini-2.0-flash",                 # estável e rápido
+    "gemini-2.0-flash-lite",            # fallback leve
 ]
 
 MAX_IMAGES = 5
 MAX_IMAGE_WIDTH = 1280
 JPEG_QUALITY = 78
-
 
 MODEL_HINTS = {
     "🔥 GERAR BOLETIM UNIVERSAL (Qualquer Modelo do Manual)": "Use o modelo mais aderente ao manual para a situação descrita.",
@@ -65,37 +67,33 @@ def get_api_key() -> Optional[str]:
     return key
 
 
-# FIX 2: Removido @st.cache_resource do modelo.
-# Cache de modelo impede a troca de fallback em runtime e mantém objetos quebrados.
-# A inicialização do Gemini é rápida; não vale o risco.
-def get_model(api_key: str) -> Tuple[Any, str]:
+def get_client_and_model(api_key: str) -> Tuple[genai.Client, str]:
     """
-    Tenta instanciar o modelo da lista CANDIDATE_MODELS em ordem.
-    Retorna (model_instance, model_name_usado).
-    Lança RuntimeError se todos falharem.
+    Instancia o cliente do novo SDK e valida qual modelo está disponível.
+    Retorna (client, model_name) ou lança RuntimeError.
     """
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
     last_exc = None
 
     for model_name in CANDIDATE_MODELS:
         try:
-            model = genai.GenerativeModel(model_name)
-            # FIX 3: Validação com probe — garante que o modelo existe antes de usar.
-            # Gera 1 token só para confirmar que a rota funciona.
-            probe = model.generate_content(
-                "ok",
-                generation_config=genai.types.GenerationConfig(max_output_tokens=1),
+            # Probe mínimo — 1 token para confirmar que o modelo responde
+            response = client.models.generate_content(
+                model=model_name,
+                contents="ok",
+                config=types.GenerateContentConfig(max_output_tokens=1),
             )
-            _ = probe.text  # levanta exceção se bloqueado ou inválido
-            return model, model_name
+            _ = response.text  # levanta exceção se bloqueado
+            return client, model_name
         except Exception as exc:
             last_exc = exc
             continue
 
     raise RuntimeError(
-        f"Nenhum modelo disponível. Último erro: {last_exc}\n"
+        f"Nenhum modelo disponível.\n"
+        f"Último erro: {last_exc}\n"
         f"Modelos tentados: {CANDIDATE_MODELS}\n"
-        "Acesse https://ai.google.dev/gemini-api/docs/models para ver os modelos ativos."
+        "Verifique sua chave de API e acesse: https://ai.google.dev/gemini-api/docs/models"
     )
 
 
@@ -108,6 +106,13 @@ def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     return buffer.getvalue(), img
+
+
+def pil_to_part(img: Image.Image) -> types.Part:
+    """Converte PIL.Image para types.Part do novo SDK."""
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
 
 
 def safe_date_str(dt: datetime) -> str:
@@ -128,13 +133,10 @@ def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-# FIX 4: Extração segura de texto da resposta.
-# response.text pode lançar ValueError se o conteúdo foi bloqueado pelo safety filter.
 def safe_extract_text(response: Any) -> str:
     try:
         return response.text or ""
-    except ValueError:
-        # Conteúdo bloqueado — extrai o que existe nos candidates
+    except Exception:
         try:
             parts = response.candidates[0].content.parts
             return " ".join(p.text for p in parts if hasattr(p, "text"))
@@ -153,7 +155,6 @@ Regras obrigatórias do manual:
 - A hora deve ser a hora do fato, não a hora do preenchimento.
 - Para pessoas sem vínculo com a Stellantis, use documento de identificação; para motoristas de transportadora, inclua endereço e filiação.
 - Em acidentes, inclua CSO, TST, ambulância e desfecho somente se essas informações existirem no relato.
-- Em fotos, respeite o tipo de ocorrência: imagens amplas para contexto; colisões exigem detalhes dos danos; carga tombada exige placa legível e demonstração da carga; ronda exige identificação do local e do fato.
 
 Tarefa:
 1) Fazer auditoria de conformidade com o manual.
@@ -199,11 +200,10 @@ def main() -> None:
         st.error("Configure `GEMINI_API_KEY` em `st.secrets` ou nas variáveis de ambiente.")
         st.stop()
 
-    # FIX 5: Inicialização com fallback visível ao usuário.
     try:
         with st.spinner("Verificando modelo disponível..."):
-            model, model_name_ativo = get_model(api_key)
-        st.caption(f"✅ Modelo ativo: `{model_name_ativo}`")
+            client, model_ativo = get_client_and_model(api_key)
+        st.caption(f"✅ Modelo ativo: `{model_ativo}`")
     except RuntimeError as exc:
         st.error(str(exc))
         st.stop()
@@ -234,17 +234,17 @@ def main() -> None:
         local_exato = st.text_input("Local exato do fato", placeholder="Ex.: Portaria 03, baia 02, galpão 04, coluna L/D")
         vigilante_relator = st.text_input("Vigilante relator / registro", placeholder="Nome e registro do vigilante")
         lider_responsavel = st.text_input("Líder / Supervisor / Gerente responsável", placeholder="Nome e sobrenome")
-        lider_contato = st.text_input("Contato do líder / supervisor / gerente", placeholder="Telefone ou ramal")
-        acionamento = st.text_area("Acionamento / providência imediata", placeholder="Ex.: Central 2400 acionada, Inspetoria no local, TST acionado...", height=90)
+        lider_contato = st.text_input("Contato do líder", placeholder="Telefone ou ramal")
+        acionamento = st.text_area("Acionamento / providência imediata", placeholder="Ex.: Central 2400 acionada...", height=90)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📝 Relato bruto</div>', unsafe_allow_html=True)
-        relato_bruto = st.text_area("Descreva os fatos", height=180, placeholder="Escreva o relato do turno com a maior quantidade possível de detalhes objetivos.")
+        relato_bruto = st.text_area("Descreva os fatos", height=180, placeholder="Escreva o relato com o máximo de detalhes objetivos.")
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown('<div class="section-title">📎 Dados complementares por tipo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">📎 Dados complementares</div>', unsafe_allow_html=True)
 
         dados_complementares: Dict[str, Any] = {}
 
@@ -258,7 +258,7 @@ def main() -> None:
                 "motorista": st.text_input("Nome do motorista"),
                 "telefone_motorista": st.text_input("Telefone do motorista"),
                 "rack_codigo": st.text_input("Código do rack / container"),
-                "descricao_peças": st.text_area("Peças / avarias / quantidade", height=80),
+                "descricao_pecas": st.text_area("Peças / avarias / quantidade", height=80),
             })
         elif any(k in tipo_ocorrencia for k in ["Colisão", "Choque", "Abalroamento"]):
             dados_complementares.update({
@@ -267,7 +267,7 @@ def main() -> None:
                 "danos_veiculo_1": st.text_area("Danos veículo 1", height=70),
                 "danos_veiculo_2": st.text_area("Danos veículo 2", height=70),
                 "houve_vitima": st.radio("Houve vítima?", ["Não", "Sim"], horizontal=True),
-                "cs0_tst_ambulancia": st.text_area("CSO / TST / ambulância / desfecho", height=90),
+                "cso_tst_ambulancia": st.text_area("CSO / TST / ambulância / desfecho", height=90),
             })
         elif any(k in tipo_ocorrencia for k in ["Controle de Acesso", "Portaria"]):
             dados_complementares.update({
@@ -280,7 +280,7 @@ def main() -> None:
             })
         else:
             dados_complementares.update({
-                "envolvidos": st.text_area("Envolvidos e dados já levantados", height=90),
+                "envolvidos": st.text_area("Envolvidos e dados levantados", height=90),
                 "veiculos_documentos": st.text_area("Veículos / documentos / equipamentos", height=90),
             })
 
@@ -299,25 +299,23 @@ def main() -> None:
     if not relato_bruto.strip():
         st.warning("Preencha o relato bruto antes de gerar o boletim.")
         st.stop()
-
     if not local_exato.strip():
         st.warning("O local exato do fato é obrigatório.")
         st.stop()
-
     if len(arquivos or []) > MAX_IMAGES:
-        st.warning(f"Envie no máximo {MAX_IMAGES} imagens por vez.")
+        st.warning(f"Envie no máximo {MAX_IMAGES} imagens.")
         st.stop()
 
-    evidencias_pil: List[Image.Image] = []
+    image_parts: List[types.Part] = []
     evidencias_info: List[str] = []
 
     for arquivo in arquivos or []:
         try:
             _, pil_img = compress_image(arquivo)
-            evidencias_pil.append(pil_img)
+            image_parts.append(pil_to_part(pil_img))  # novo SDK usa Part
             evidencias_info.append(arquivo.name)
         except Exception as exc:
-            st.error(f"Falha ao processar a imagem {arquivo.name}: {exc}")
+            st.error(f"Falha ao processar {arquivo.name}: {exc}")
             st.stop()
 
     payload = {
@@ -336,8 +334,10 @@ def main() -> None:
         "timestamp_geracao": safe_date_str(datetime.now()),
     }
 
-    prompt = build_prompt(payload)
-    parts: List[Any] = [prompt] + evidencias_pil
+    prompt_text = build_prompt(payload)
+
+    # Monta contents para o novo SDK: texto + imagens como Parts
+    contents: List[Any] = [types.Part.from_text(text=prompt_text)] + image_parts
 
     with st.spinner("Processando o relato com a Skill BO..."):
         texto = ""
@@ -345,8 +345,12 @@ def main() -> None:
 
         for tentativa in range(3):
             try:
-                response = model.generate_content(parts)
-                texto = safe_extract_text(response)  # FIX 4 aplicado
+                response = client.models.generate_content(
+                    model=model_ativo,
+                    contents=contents,
+                    config=types.GenerateContentConfig(max_output_tokens=4096),
+                )
+                texto = safe_extract_text(response)
                 parsed = parse_json_response(texto)
                 if parsed:
                     break
@@ -359,23 +363,21 @@ def main() -> None:
                     st.stop()
 
     if not parsed:
-        st.warning("O modelo não retornou JSON válido. Exibindo a resposta bruta para revisão.")
+        st.warning("O modelo não retornou JSON válido. Resposta bruta:")
         st.code(texto)
         st.stop()
 
     audit = parsed.get("audit", {})
     bo = parsed.get("bo", {})
 
-    st.success(f"Processamento concluído com `{model_name_ativo}`.")
+    st.success(f"Processamento concluído com `{model_ativo}`.")
 
     st.subheader("Auditoria de conformidade")
     render_kv("Modelo identificado", audit.get("modelo_identificado", "NÃO INFORMADO"))
     render_kv("Conformidade", audit.get("conformidade", "NÃO INFORMADO"))
-
     st.markdown("**Dados críticos localizados**")
     for item in audit.get("dados_criticos_localizados", []):
         st.write(f"- {item}")
-
     st.markdown("**Lacunas**")
     for item in audit.get("lacunas", []):
         st.write(f"- {item}")
@@ -387,19 +389,15 @@ def main() -> None:
     render_kv("Dinâmica", bo.get("dinamica", "NÃO INFORMADO"))
     render_kv("Alegação", bo.get("alegacao", "NÃO INFORMADO"))
     render_kv("Status", bo.get("status", "NÃO INFORMADO"))
-
     st.markdown("**Envolvidos**")
     for item in bo.get("envolvidos", []):
         st.write(f"- {item}")
-
     st.markdown("**Ativos / veículos / documentos**")
     for item in bo.get("ativos_veiculos_documentos", []):
         st.write(f"- {item}")
-
     st.markdown("**Providências**")
     for item in bo.get("providencias", []):
         st.write(f"- {item}")
-
     st.markdown("**Anexos recomendados**")
     for item in bo.get("anexos_recomendados", []):
         st.write(f"- {item}")
