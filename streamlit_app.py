@@ -12,8 +12,8 @@ from PIL import Image
 
 
 APP_TITLE = "Sentinela Bravo — Skill BO"
-# CORREÇÃO DEFINITIVA: Adicionado o prefixo 'models/' para evitar o erro 404 na API v1beta
-MODEL_NAME = "models/gemini-1.5-flash"
+# Configuração universal estável para evitar erros de rota (404 v1beta)
+MODEL_NAME = "gemini-1.5-flash"
 MAX_IMAGES = 5
 MAX_IMAGE_WIDTH = 1280
 JPEG_QUALITY = 78
@@ -77,6 +77,7 @@ def get_api_key() -> Optional[str]:
 
 @st.cache_resource(show_spinner=False)
 def get_model(api_key: str) -> Any:
+    # Garante a inicialização limpa da API do Google
     genai.configure(api_key=api_key)
     return genai.GenerativeModel(MODEL_NAME)
 
@@ -180,7 +181,8 @@ def main() -> None:
     col1, col2 = st.columns([1, 4])
     with col1:
         try:
-            logo = Image.open("sentinela_icon_192.jpg")
+            # Correção do nome do arquivo de logo baixado para o projeto
+            logo = Image.open("sentinela bravo.jpg")
             st.image(logo, width=96)
         except Exception:
             st.write("🛡️")
@@ -334,7 +336,6 @@ def main() -> None:
     prompt = build_prompt(payload)
     parts: List[Any] = [prompt] + evidencias_pil
 
-    # PROCESSAMENTO INTELIGENTE: Blindado contra erros de rota (404) e oscilações de rede
     with st.spinner("Processando o relato com a Skill BO..."):
         texto = ""
         parsed = None
@@ -343,7 +344,6 @@ def main() -> None:
             try:
                 response = model.generate_content(parts)
                 
-                # OTIMIZAÇÃO: Valida se a resposta tem partes válidas antes de extrair o texto
                 if response and hasattr(response, "text"):
                     texto = response.text or ""
                     parsed = parse_json_response(texto)
@@ -356,9 +356,6 @@ def main() -> None:
                     time.sleep(2)
                 else:
                     st.error(f"❌ Erro definitivo de comunicação com o servidor: {exc}")
-                    st.markdown("""
-                    **Dica de Infraestrutura:** Se o erro 404 persistir, verifique se a sua biblioteca do Google está atualizada executando `pip install --upgrade google-generativeai` no ambiente do servidor.
-                    """)
                     st.stop()
 
     if not parsed:
