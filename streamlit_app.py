@@ -12,8 +12,15 @@ from PIL import Image
 
 
 APP_TITLE = "Sentinela Bravo — Skill BO"
-# Configuração universal estável para evitar erros de rota (404 v1beta)
-MODEL_NAME = "gemini-1.5-flash"
+
+# FIX 1: Lista de fallback — tenta o mais recente; se falhar, desce a lista.
+# Atualizar aqui quando a Google lançar novos modelos.
+CANDIDATE_MODELS = [
+    "gemini-2.0-flash",          # atual e rápido (2025)
+    "gemini-2.0-flash-lite",     # mais leve, fallback
+    "gemini-1.5-flash-latest",   # alias estável — evita deprecação silenciosa
+]
+
 MAX_IMAGES = 5
 MAX_IMAGE_WIDTH = 1280
 JPEG_QUALITY = 78
@@ -36,25 +43,9 @@ def init_page() -> None:
         <style>
         .main { background-color: #0d1117; }
         h1, h2, h3 { color: #f97316; }
-        .subtitle {
-            color: #8b949e;
-            text-align: center;
-            font-size: 1.02rem;
-            margin-bottom: 1.2rem;
-        }
-        .section-card {
-            background-color: #161b22;
-            padding: 16px;
-            border-radius: 14px;
-            border: 1px solid #30363d;
-            margin-bottom: 14px;
-        }
-        .section-title {
-            color: #f97316;
-            font-size: 1.08rem;
-            font-weight: 700;
-            margin-bottom: 10px;
-        }
+        .subtitle { color: #8b949e; text-align: center; font-size: 1.02rem; margin-bottom: 1.2rem; }
+        .section-card { background-color: #161b22; padding: 16px; border-radius: 14px; border: 1px solid #30363d; margin-bottom: 14px; }
+        .section-title { color: #f97316; font-size: 1.08rem; font-weight: 700; margin-bottom: 10px; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -69,28 +60,51 @@ def get_api_key() -> Optional[str]:
         key = None
     if not key:
         key = os.getenv("GEMINI_API_KEY")
-        
     if key:
         key = key.strip().replace('"', '').replace("'", "")
     return key
 
 
-@st.cache_resource(show_spinner=False)
-def get_model(api_key: str) -> Any:
-    # Garante a inicialização limpa da API do Google
+# FIX 2: Removido @st.cache_resource do modelo.
+# Cache de modelo impede a troca de fallback em runtime e mantém objetos quebrados.
+# A inicialização do Gemini é rápida; não vale o risco.
+def get_model(api_key: str) -> Tuple[Any, str]:
+    """
+    Tenta instanciar o modelo da lista CANDIDATE_MODELS em ordem.
+    Retorna (model_instance, model_name_usado).
+    Lança RuntimeError se todos falharem.
+    """
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel(MODEL_NAME)
+    last_exc = None
+
+    for model_name in CANDIDATE_MODELS:
+        try:
+            model = genai.GenerativeModel(model_name)
+            # FIX 3: Validação com probe — garante que o modelo existe antes de usar.
+            # Gera 1 token só para confirmar que a rota funciona.
+            probe = model.generate_content(
+                "ok",
+                generation_config=genai.types.GenerationConfig(max_output_tokens=1),
+            )
+            _ = probe.text  # levanta exceção se bloqueado ou inválido
+            return model, model_name
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    raise RuntimeError(
+        f"Nenhum modelo disponível. Último erro: {last_exc}\n"
+        f"Modelos tentados: {CANDIDATE_MODELS}\n"
+        "Acesse https://ai.google.dev/gemini-api/docs/models para ver os modelos ativos."
+    )
 
 
 def compress_image(uploaded_file: Any) -> Tuple[bytes, Image.Image]:
     raw = uploaded_file.read()
     img = Image.open(io.BytesIO(raw))
-
     if img.mode != "RGB":
         img = img.convert("RGB")
-
     img.thumbnail((MAX_IMAGE_WIDTH, MAX_IMAGE_WIDTH))
-
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     return buffer.getvalue(), img
@@ -105,7 +119,6 @@ def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
         return json.loads(text)
     except Exception:
         pass
-
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if not match:
         return None
@@ -113,6 +126,20 @@ def parse_json_response(text: str) -> Optional[Dict[str, Any]]:
         return json.loads(match.group(0))
     except Exception:
         return None
+
+
+# FIX 4: Extração segura de texto da resposta.
+# response.text pode lançar ValueError se o conteúdo foi bloqueado pelo safety filter.
+def safe_extract_text(response: Any) -> str:
+    try:
+        return response.text or ""
+    except ValueError:
+        # Conteúdo bloqueado — extrai o que existe nos candidates
+        try:
+            parts = response.candidates[0].content.parts
+            return " ".join(p.text for p in parts if hasattr(p, "text"))
+        except Exception:
+            return ""
 
 
 def build_prompt(payload: Dict[str, Any]) -> str:
@@ -133,7 +160,7 @@ Tarefa:
 2) Gerar o boletim interno estruturado.
 3) Indicar lacunas de coleta sem inventar dados.
 
-Formato de saída obrigatório:
+Formato de saída obrigatório (JSON puro, sem markdown, sem texto fora das chaves):
 {{
   "audit": {{
     "modelo_identificado": "",
@@ -172,16 +199,18 @@ def main() -> None:
         st.error("Configure `GEMINI_API_KEY` em `st.secrets` ou nas variáveis de ambiente.")
         st.stop()
 
+    # FIX 5: Inicialização com fallback visível ao usuário.
     try:
-        model = get_model(api_key)
-    except Exception as exc:
-        st.error(f"Falha ao inicializar o modelo: {exc}")
+        with st.spinner("Verificando modelo disponível..."):
+            model, model_name_ativo = get_model(api_key)
+        st.caption(f"✅ Modelo ativo: `{model_name_ativo}`")
+    except RuntimeError as exc:
+        st.error(str(exc))
         st.stop()
 
     col1, col2 = st.columns([1, 4])
     with col1:
         try:
-            # Correção do nome do arquivo de logo baixado para o projeto
             logo = Image.open("sentinela bravo.jpg")
             st.image(logo, width=96)
         except Exception:
@@ -202,30 +231,16 @@ def main() -> None:
 
         data_fato = st.date_input("Data da ocorrência")
         hora_fato = st.time_input("Hora da ocorrência")
-        local_exato = st.text_input(
-            "Local exato do fato",
-            placeholder="Ex.: Portaria 03, baia 02, galpão 04, coluna L/D",
-        )
+        local_exato = st.text_input("Local exato do fato", placeholder="Ex.: Portaria 03, baia 02, galpão 04, coluna L/D")
         vigilante_relator = st.text_input("Vigilante relator / registro", placeholder="Nome e registro do vigilante")
-        lider_responsavel = st.text_input(
-            "Líder / Supervisor / Gerente responsável",
-            placeholder="Nome e sobrenome",
-        )
+        lider_responsavel = st.text_input("Líder / Supervisor / Gerente responsável", placeholder="Nome e sobrenome")
         lider_contato = st.text_input("Contato do líder / supervisor / gerente", placeholder="Telefone ou ramal")
-        acionamento = st.text_area(
-            "Acionamento / providência imediata",
-            placeholder="Ex.: Central 2400 acionada, Inspetoria no local, TST acionado, CSO acionado...",
-            height=90,
-        )
+        acionamento = st.text_area("Acionamento / providência imediata", placeholder="Ex.: Central 2400 acionada, Inspetoria no local, TST acionado...", height=90)
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📝 Relato bruto</div>', unsafe_allow_html=True)
-        relato_bruto = st.text_area(
-            "Descreva os fatos",
-            height=180,
-            placeholder="Escreva o relato do turno com a maior quantidade possível de detalhes objetivos.",
-        )
+        relato_bruto = st.text_area("Descreva os fatos", height=180, placeholder="Escreva o relato do turno com a maior quantidade possível de detalhes objetivos.")
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -234,58 +249,46 @@ def main() -> None:
         dados_complementares: Dict[str, Any] = {}
 
         if "Carga Tombada" in tipo_ocorrencia:
-            dados_complementares.update(
-                {
-                    "placa_veiculo": st.text_input("Placa do veículo"),
-                    "mvm": st.text_input("MVM"),
-                    "danfe": st.text_input("DANFE"),
-                    "transportadora": st.text_input("Transportadora"),
-                    "fornecedor": st.text_input("Fornecedor"),
-                    "motorista": st.text_input("Nome do motorista"),
-                    "telefone_motorista": st.text_input("Telefone do motorista"),
-                    "rack_codigo": st.text_input("Código do rack / container"),
-                    "descricao_peças": st.text_area("Peças / avarias / quantidade", height=80),
-                }
-            )
-        elif "Colisão" in tipo_ocorrencia or "Choque" in tipo_ocorrencia or "Abalroamento" in tipo_ocorrencia:
-            dados_complementares.update(
-                {
-                    "veiculo_1": st.text_input("Veículo 1"),
-                    "veiculo_2": st.text_input("Veículo 2"),
-                    "danos_veiculo_1": st.text_area("Danos veículo 1", height=70),
-                    "danos_veiculo_2": st.text_area("Danos veículo 2", height=70),
-                    "houve_vitima": st.radio("Houve vítima?", ["Não", "Sim"], horizontal=True),
-                    "cs0_tst_ambulancia": st.text_area("CSO / TST / ambulância / desfecho", height=90),
-                }
-            )
-        elif "Controle de Acesso" in tipo_ocorrencia or "Portaria" in tipo_ocorrencia:
-            dados_complementares.update(
-                {
-                    "nome_colaborador": st.text_input("Nome do colaborador / visitante"),
-                    "matricula": st.text_input("Matrícula / registro"),
-                    "empresa_setor": st.text_input("Empresa / setor"),
-                    "objeto_recolhido": st.text_input("Objeto / equipamento / documento"),
-                    "documentacao": st.text_input("Documentação que acoberta a saída"),
-                    "guarda_objetos": st.text_input("Nº de guarda de objetos / alfândega"),
-                }
-            )
+            dados_complementares.update({
+                "placa_veiculo": st.text_input("Placa do veículo"),
+                "mvm": st.text_input("MVM"),
+                "danfe": st.text_input("DANFE"),
+                "transportadora": st.text_input("Transportadora"),
+                "fornecedor": st.text_input("Fornecedor"),
+                "motorista": st.text_input("Nome do motorista"),
+                "telefone_motorista": st.text_input("Telefone do motorista"),
+                "rack_codigo": st.text_input("Código do rack / container"),
+                "descricao_peças": st.text_area("Peças / avarias / quantidade", height=80),
+            })
+        elif any(k in tipo_ocorrencia for k in ["Colisão", "Choque", "Abalroamento"]):
+            dados_complementares.update({
+                "veiculo_1": st.text_input("Veículo 1"),
+                "veiculo_2": st.text_input("Veículo 2"),
+                "danos_veiculo_1": st.text_area("Danos veículo 1", height=70),
+                "danos_veiculo_2": st.text_area("Danos veículo 2", height=70),
+                "houve_vitima": st.radio("Houve vítima?", ["Não", "Sim"], horizontal=True),
+                "cs0_tst_ambulancia": st.text_area("CSO / TST / ambulância / desfecho", height=90),
+            })
+        elif any(k in tipo_ocorrencia for k in ["Controle de Acesso", "Portaria"]):
+            dados_complementares.update({
+                "nome_colaborador": st.text_input("Nome do colaborador / visitante"),
+                "matricula": st.text_input("Matrícula / registro"),
+                "empresa_setor": st.text_input("Empresa / setor"),
+                "objeto_recolhido": st.text_input("Objeto / equipamento / documento"),
+                "documentacao": st.text_input("Documentação que acoberta a saída"),
+                "guarda_objetos": st.text_input("Nº de guarda de objetos / alfândega"),
+            })
         else:
-            dados_complementares.update(
-                {
-                    "envolvidos": st.text_area("Envolvidos e dados já levantados", height=90),
-                    "veiculos_documentos": st.text_area("Veículos / documentos / equipamentos", height=90),
-                }
-            )
+            dados_complementares.update({
+                "envolvidos": st.text_area("Envolvidos e dados já levantados", height=90),
+                "veiculos_documentos": st.text_area("Veículos / documentos / equipamentos", height=90),
+            })
 
         st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown('<div class="section-title">📸 Evidências</div>', unsafe_allow_html=True)
-        arquivos = st.file_uploader(
-            "Anexe até 5 imagens",
-            type=["png", "jpg", "jpeg", "webp"],
-            accept_multiple_files=True,
-        )
+        arquivos = st.file_uploader("Anexe até 5 imagens", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         submit = st.form_submit_button("🚀 Gerar BO")
@@ -339,23 +342,20 @@ def main() -> None:
     with st.spinner("Processando o relato com a Skill BO..."):
         texto = ""
         parsed = None
-        
+
         for tentativa in range(3):
             try:
                 response = model.generate_content(parts)
-                
-                if response and hasattr(response, "text"):
-                    texto = response.text or ""
-                    parsed = parse_json_response(texto)
-                
+                texto = safe_extract_text(response)  # FIX 4 aplicado
+                parsed = parse_json_response(texto)
                 if parsed:
                     break
             except Exception as exc:
                 if tentativa < 2:
-                    st.warning(f"⚠️ Conexão oscilando na planta. Tentativa {tentativa + 1} de 3... Reconectando em 2s.")
+                    st.warning(f"⚠️ Tentativa {tentativa + 1} de 3... aguardando 2s.")
                     time.sleep(2)
                 else:
-                    st.error(f"❌ Erro definitivo de comunicação com o servidor: {exc}")
+                    st.error(f"❌ Erro definitivo: {exc}")
                     st.stop()
 
     if not parsed:
@@ -366,7 +366,7 @@ def main() -> None:
     audit = parsed.get("audit", {})
     bo = parsed.get("bo", {})
 
-    st.success("Processamento concluído.")
+    st.success(f"Processamento concluído com `{model_name_ativo}`.")
 
     st.subheader("Auditoria de conformidade")
     render_kv("Modelo identificado", audit.get("modelo_identificado", "NÃO INFORMADO"))
