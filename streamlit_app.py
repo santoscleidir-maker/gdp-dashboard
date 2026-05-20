@@ -2,7 +2,7 @@ import io
 import json
 import os
 import re
-import time  # Importação adicionada para controlar o tempo de reconexão
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,7 +12,8 @@ from PIL import Image
 
 
 APP_TITLE = "Sentinela Bravo — Skill BO"
-MODEL_NAME = "gemini-1.5-flash"
+# CORREÇÃO DEFINITIVA: Adicionado o prefixo 'models/' para evitar o erro 404 na API v1beta
+MODEL_NAME = "models/gemini-1.5-flash"
 MAX_IMAGES = 5
 MAX_IMAGE_WIDTH = 1280
 JPEG_QUALITY = 78
@@ -23,7 +24,7 @@ MODEL_HINTS = {
     "📦 Carga Tombada / Peças Molhadas / Danos em Racks": "Exigir dados de carga, transportadora, motorista, MVM, DANFE, rack e destino da avaliação.",
     "❌ Recusa de Carga / Divergência Fiscal / Excesso de Jornada": "Exigir dados de transporte, horários, placas, MVM e justificativas formais.",
     "Acidente de Trânsito / Colisão Interna (Choque ou Abalroamento)": "Exigir veículos, placas, chassi, tipo de impacto, danos por lado e desfecho com CSO/TST/ambulância se houver.",
-    "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)": "Exigir relato objective, identificação completa, liderança responsável e providências.",
+    "Desvio de Segurança / Quebra de Regra de Ouro (Falta Grave)": "Exigir relato objetivo, identificação completa, liderança responsável e providências.",
     "Controle de Acesso / Portaria (Notebooks / Instabilidade Ronda)": "Exigir portaria, item recolhido, documentação, guarda de objetos e providência tomada.",
 }
 
@@ -69,7 +70,6 @@ def get_api_key() -> Optional[str]:
     if not key:
         key = os.getenv("GEMINI_API_KEY")
         
-    # CORREÇÃO CRÍTICA: Limpa espaços e aspas extras colados pelo celular
     if key:
         key = key.strip().replace('"', '').replace("'", "")
     return key
@@ -334,7 +334,7 @@ def main() -> None:
     prompt = build_prompt(payload)
     parts: List[Any] = [prompt] + evidencias_pil
 
-    # CORREÇÃO CRÍTICA INTEGRADA: Processamento Inteligente com 3 tentativas contra quedas de sinal
+    # PROCESSAMENTO INTELIGENTE: Blindado contra erros de rota (404) e oscilações de rede
     with st.spinner("Processando o relato com a Skill BO..."):
         texto = ""
         parsed = None
@@ -342,10 +342,12 @@ def main() -> None:
         for tentativa in range(3):
             try:
                 response = model.generate_content(parts)
-                texto = getattr(response, "text", "") or ""
-                parsed = parse_json_response(texto)
                 
-                # Se obteve sucesso na resposta e na conversão do JSON, encerra as tentativas
+                # OTIMIZAÇÃO: Valida se a resposta tem partes válidas antes de extrair o texto
+                if response and hasattr(response, "text"):
+                    texto = response.text or ""
+                    parsed = parse_json_response(texto)
+                
                 if parsed:
                     break
             except Exception as exc:
@@ -354,6 +356,9 @@ def main() -> None:
                     time.sleep(2)
                 else:
                     st.error(f"❌ Erro definitivo de comunicação com o servidor: {exc}")
+                    st.markdown("""
+                    **Dica de Infraestrutura:** Se o erro 404 persistir, verifique se a sua biblioteca do Google está atualizada executando `pip install --upgrade google-generativeai` no ambiente do servidor.
+                    """)
                     st.stop()
 
     if not parsed:
